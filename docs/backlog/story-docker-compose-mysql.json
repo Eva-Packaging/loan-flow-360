@@ -1,0 +1,51 @@
+{
+  "summary": "Configure Docker Compose with MySQL 8 for local development infrastructure",
+  "description": "Set up a shared MySQL 8 Docker Compose service for local development. This is an infrastructure-level story not tied to any single service. All backend services requiring MySQL will depend on this container. Configuration covers the Compose service definition, named volumes, networking, custom MySQL settings, a healthcheck, an init script to provision databases and users on first startup, and environment variable definitions in .env.example.",
+  "labels": ["infrastructure", "mysql", "docker-compose", "local-dev", "database"],
+  "priority": "High",
+  "storyPoints": 3,
+  "acceptanceCriteria": [
+    {
+      "scenario": "MySQL container starts and passes healthcheck",
+      "given": "a developer has Docker installed and has copied infra/.env.example to infra/.env",
+      "when": "they run docker compose -f infra/docker-compose.yml up -d",
+      "then": "the MySQL 8 container starts, the healthcheck passes, and the service is reachable on the configured port"
+    },
+    {
+      "scenario": "Databases and users are provisioned automatically on first startup",
+      "given": "no prior MySQL data volume exists",
+      "when": "the MySQL container starts for the first time",
+      "then": "the init script runs, creating the required databases and users with the correct grants before any service attempts to connect"
+    },
+    {
+      "scenario": "Secrets are not committed to source control",
+      "given": "a developer clones the repository",
+      "when": "they inspect the infra directory",
+      "then": ".env is absent from git but .env.example is present with all required variable names and safe placeholder defaults"
+    },
+    {
+      "scenario": "Data persists across container restarts",
+      "given": "the MySQL container has been used and stopped",
+      "when": "docker compose up is run again",
+      "then": "previously written data is available because a named volume preserves the data directory"
+    }
+  ],
+  "tasks": [
+    {
+      "summary": "Populate infra/.env.example with MySQL environment variables",
+      "description": "Add all MySQL-related variable definitions to infra/.env.example with safe placeholder defaults:\n\nDATABASE_HOST=localhost\nDATABASE_PORT=3306\nDATABASE_ROOT_PASSWORD=rootpassword\nDATABASE_USER=loanflow\nDATABASE_PASSWORD=password\nLOAN_SERVICE_DB=loanflow_loan_db\n\nAdd a comment block grouping these under # MySQL. This file is committed. The actual .env is covered by infra/.gitignore."
+    },
+    {
+      "summary": "Create infra/docker-compose.yml with MySQL 8 service definition",
+      "description": "Define the MySQL 8 service in infra/docker-compose.yml with the following configuration:\n\n- Image: mysql:8.0\n- Container name: loanflow-mysql\n- env_file: .env\n- Environment: MYSQL_ROOT_PASSWORD, MYSQL_USER, MYSQL_PASSWORD sourced from env vars\n- Port mapping: ${DATABASE_PORT:-3306}:3306\n- Named volume: mysql_data mounted to /var/lib/mysql\n- Init script volume: ./mysql/init:/docker-entrypoint-initdb.d (read-only)\n- Custom config volume: ./mysql/conf.d:/etc/mysql/conf.d (read-only)\n- Healthcheck: mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD with interval 10s, timeout 5s, retries 5\n- Restart policy: unless-stopped\n\nDeclare the mysql_data named volume at the top-level volumes key."
+    },
+    {
+      "summary": "Create MySQL init script to provision databases and users",
+      "description": "Create infra/mysql/init/01_init.sql. This script runs automatically on first container startup via docker-entrypoint-initdb.d. It should:\n\n- Create each service database if it does not exist, e.g.:\n  CREATE DATABASE IF NOT EXISTS loanflow_loan_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n\n- Grant the application user full privileges on each service database:\n  GRANT ALL PRIVILEGES ON loanflow_loan_db.* TO '${DATABASE_USER}'@'%';\n  FLUSH PRIVILEGES;\n\nAs additional services requiring MySQL are added, their databases are appended to this script."
+    },
+    {
+      "summary": "Create custom MySQL configuration file",
+      "description": "Create infra/mysql/conf.d/custom.cnf to configure MySQL server settings beyond the defaults:\n\n[mysqld]\ncharacter-set-server = utf8mb4\ncollation-server     = utf8mb4_unicode_ci\ndefault-time-zone    = '+00:00'\nmax_connections      = 200\ninnodb_buffer_pool_size = 256M\nslow_query_log       = 1\nlong_query_time      = 2\n\nThis file is mounted read-only into the container at /etc/mysql/conf.d."
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "summary": "Fix underwriting-service scaffold structure and naming inconsistencies",
+  "description": "The underwriting-service scaffold has three structural problems that must be resolved before data layer work begins:\n\n1. Nested directory: all service content lives at backend/underwriting-service/underwriting-service/ instead of backend/underwriting-service/\n2. Profile file extension: application-dev.yml and application-prod.yml use .yml while every other service in the repository uses .yaml\n3. Package name: com.loanflow.underwriting_service uses an underscore, which is non-standard Java package naming — should be com.loanflow.underwritingservice\n\nAdditionally, application.yaml contains only spring.application.name with no management or actuator configuration, which must be added to match the expected baseline.",
+  "labels": ["underwriting-service", "scaffold", "structure", "fix", "spring-boot"],
+  "priority": "High",
+  "storyPoints": 2,
+  "acceptanceCriteria": [
+    {
+      "scenario": "Service content is at the correct directory level",
+      "given": "the fix has been applied",
+      "when": "the repository is inspected",
+      "then": "all underwriting-service files (pom.xml, mvnw, src/) exist directly under backend/underwriting-service/ with no nested underwriting-service subdirectory"
+    },
+    {
+      "scenario": "All profile files use .yaml extension",
+      "given": "the fix has been applied",
+      "when": "the resources directory is inspected",
+      "then": "application.yaml, application-dev.yaml, and application-prod.yaml all use the .yaml extension and no .yml files remain"
+    },
+    {
+      "scenario": "Package name follows standard Java conventions",
+      "given": "the fix has been applied",
+      "when": "the Java source is inspected",
+      "then": "all classes use the package com.loanflow.underwritingservice with no underscore"
+    },
+    {
+      "scenario": "Service starts with actuator health endpoint responding",
+      "given": "the fix has been applied",
+      "when": "mvnw spring-boot:run is executed from backend/underwriting-service",
+      "then": "GET /actuator/health returns a 200 response with full health details"
+    }
+  ],
+  "tasks": [
+    {
+      "summary": "Move service content out of nested directory",
+      "description": "Move all files and directories from backend/underwriting-service/underwriting-service/ up one level to backend/underwriting-service/. After the move, the following should exist directly under backend/underwriting-service/:\n\n- pom.xml\n- mvnw / mvnw.cmd\n- .mvn/\n- src/\n- .gitattributes\n- .gitignore\n\nDelete the now-empty inner underwriting-service/ directory. Verify the Maven build still resolves from backend/underwriting-service/."
+    },
+    {
+      "summary": "Rename .yml profile files to .yaml",
+      "description": "Rename the following files in src/main/resources:\n\n- application-dev.yml → application-dev.yaml\n- application-prod.yml → application-prod.yaml\n\nCreate src/test/resources/application-test.yaml as an empty stub. Verify no references to .yml filenames remain in pom.xml or any configuration."
+    },
+    {
+      "summary": "Fix package name from com.loanflow.underwriting_service to com.loanflow.underwritingservice",
+      "description": "Rename the Java package across all source files:\n\n- Rename directory src/main/java/com/loanflow/underwriting_service/ to src/main/java/com/loanflow/underwritingservice/\n- Update the package declaration in UnderwritingServiceApplication.java\n- Rename directory src/test/java/com/loanflow/underwriting_service/ to src/test/java/com/loanflow/underwritingservice/\n- Update the package declaration in UnderwritingServiceApplicationTests.java\n\nVerify mvnw test passes after the rename."
+    },
+    {
+      "summary": "Add actuator and logging configuration to application.yaml",
+      "description": "Expand application.yaml beyond spring.application.name to include the management and logging baseline, consistent with other services in the repository:\n\nspring:\n  application:\n    name: underwriting-service\n\nmanagement:\n  endpoints:\n    web:\n      exposure:\n        include: health, info, metrics\n  endpoint:\n    health:\n      show-details: always\n\nlogging:\n  level:\n    root: INFO\n    com.loanflow: DEBUG"
+    }
+  ]
+}

@@ -1,0 +1,219 @@
+{
+  "summary": "Underwriting Service — Data Layer Foundation",
+  "description": "Establish the complete data persistence layer for the underwriting-service. This epic begins with a structural fix story that resolves a nested directory layout, inconsistent profile file extensions, and a non-standard package name — all of which must be resolved before data layer work can proceed. It then covers service profile configuration, Flyway-managed schema creation for underwriting_cases, underwriting_checks, underwriting_decisions, and manual_review_notes, JPA entity mapping, repository setup, and the test infrastructure needed to validate migration and entity alignment without requiring a running database.\n\nThe processed_events table is intentionally excluded from this epic — it supports Kafka idempotent consumption and belongs to the event-driven workflow epic.\n\nStories in this epic are sourced from:\n- story-underwriting-scaffold-fix.json\n- story-underwriting-application-properties.json\n- stories-underwriting-schema.json (migrations, UnderwritingCase and Check entities, UnderwritingDecision and ManualReviewNote entities)\n\nThe Docker Compose MySQL infrastructure story is excluded — it is tracked under a separate infrastructure epic.",
+  "labels": [
+    "underwriting-service",
+    "data-layer",
+    "jpa",
+    "flyway",
+    "schema",
+    "mysql",
+    "sprint-2",
+    "module-5"
+  ],
+  "priority": "High",
+  "userType": "backend developer owning the Underwriting and Decision Service",
+  "functionality": "fix the service scaffold structure and configure the data layer including database connectivity, schema migrations, JPA entities for underwriting cases, checks, decisions, and manual review notes, and test infrastructure",
+  "benefit": "so the underwriting service has a structurally sound, validated persistence foundation that the underwriting rules engine, Kafka consumers, and decision workflow features can build on without schema drift between environments",
+  "stories": [
+    {
+      "summary": "Configure application properties across dev and test profiles for underwriting-service",
+      "description": "Following resolution of the scaffold structure fix story, this story adds the required Maven dependencies for persistence, migration, and validation, defines environment variables for the underwriting database, and populates application-dev.yaml and application-test.yaml so the service can start, connect to MySQL, run Flyway migrations, and run tests in isolation against H2 without requiring a running database instance.\n\nNote: infra/mysql/init/01_init.sql must be updated to provision the loanflow_underwriting_db database and grant the application user access. This depends on the Docker Compose MySQL infrastructure story.\n\nNote: processed_events table is excluded from this epic — it is part of the Kafka idempotency pattern introduced in the event-driven workflow epic.",
+      "labels": [
+        "underwriting-service",
+        "configuration",
+        "jpa",
+        "flyway",
+        "mysql",
+        "spring-boot",
+        "profiles"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Service starts and runs Flyway migrations on dev profile",
+          "given": "the MySQL container is running and environment variables are set from .env",
+          "when": "the underwriting-service starts with the dev profile",
+          "then": "Flyway runs migration scripts from classpath:db/migration against loanflow_underwriting_db and JPA validates the schema without attempting to auto-create tables"
+        },
+        {
+          "scenario": "Tests run Flyway migrations against H2 and validate entity mappings",
+          "given": "the test profile is active and no MySQL instance is running",
+          "when": "mvnw test is executed",
+          "then": "Flyway runs all migration scripts against H2 in-memory, Hibernate validates entity mappings against the migrated schema, and the context loads without error"
+        },
+        {
+          "scenario": "No credentials are hardcoded in source",
+          "given": "a developer inspects application-dev.yaml",
+          "when": "they review the datasource configuration",
+          "then": "all connection values are resolved from environment variables with inline defaults and no plaintext credentials appear in committed files"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add JPA, MySQL, Flyway, Validation, and H2 dependencies to pom.xml",
+          "description": "Add the following dependencies to the underwriting-service pom.xml:\n\n- spring-boot-starter-data-jpa\n- spring-boot-starter-validation\n- mysql-connector-j (runtime scope)\n- flyway-core\n- com.h2database:h2 (test scope only)\n\nEnsure versions are compatible with Spring Boot 3.5.13."
+        },
+        {
+          "summary": "Add underwriting database environment variables to infra/.env.example",
+          "description": "Append underwriting-service database variables to infra/.env.example under a labelled comment block:\n\n# Underwriting Service\nUNDERWRITING_DB_NAME=loanflow_underwriting_db\n\nThe shared DATABASE_HOST, DATABASE_PORT, DATABASE_USER, DATABASE_PASSWORD, and MYSQL_ROOT_PASSWORD variables are reused from the base MySQL block.\n\nAlso update infra/mysql/init/01_init.sql to provision the underwriting database:\nCREATE DATABASE IF NOT EXISTS loanflow_underwriting_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\nGRANT ALL PRIVILEGES ON loanflow_underwriting_db.* TO '${DATABASE_USER}'@'%';\nFLUSH PRIVILEGES;"
+        },
+        {
+          "summary": "Configure datasource, JPA, and Flyway in application-dev.yaml",
+          "description": "Populate application-dev.yaml with server port, datasource, JPA, and Flyway settings. Each connection part must use environment variable substitution with inline defaults:\n\nserver:\n  port: 8084\n\nspring:\n  datasource:\n    url: jdbc:mysql://${DATABASE_HOST:localhost}:${DATABASE_PORT:3306}/${UNDERWRITING_DB_NAME:loanflow_underwriting_db}\n    username: ${DATABASE_USER:loanflow}\n    password: ${DATABASE_PASSWORD:password}\n  jpa:\n    hibernate:\n      ddl-auto: validate\n    show-sql: true\n    properties:\n      hibernate:\n        dialect: org.hibernate.dialect.MySQLDialect\n        format_sql: true\n  flyway:\n    enabled: true\n    locations: classpath:db/migration"
+        },
+        {
+          "summary": "Configure application-test.yaml to run Flyway against H2 with schema validation",
+          "description": "Populate application-test.yaml so tests run Flyway migrations against H2 in-memory and validate entity mappings against the migrated schema without requiring MySQL or Docker:\n\nspring:\n  datasource:\n    url: jdbc:h2:mem:loanflow_underwriting_test;DB_CLOSE_DELAY=-1;MODE=MySQL;NON_KEYWORDS=VALUE\n    driver-class-name: org.h2.Driver\n    username: sa\n    password:\n  jpa:\n    hibernate:\n      ddl-auto: validate\n    show-sql: true\n  flyway:\n    enabled: true\n    locations: classpath:db/migration\n\nNote: migration SQL must be written to the H2-compatible subset. Avoid ON UPDATE CURRENT_TIMESTAMP and ENGINE=InnoDB."
+        }
+      ]
+    },
+    {
+      "summary": "Create Flyway migration scripts for underwriting service schema",
+      "description": "Write the SQL migration scripts that define the underwriting service database schema across four tables: underwriting_cases, underwriting_checks, underwriting_decisions, and manual_review_notes. The processed_events table is excluded — it belongs to the Kafka idempotency pattern introduced in the event-driven workflow epic. Migrations run in order via Flyway against MySQL 8 in dev and against H2 in MySQL mode in the test profile. All SQL must be written to the common subset supported by both targets: avoid ON UPDATE CURRENT_TIMESTAMP, ENGINE=InnoDB, and MySQL-specific index syntax not supported by H2.",
+      "labels": [
+        "underwriting-service",
+        "flyway",
+        "schema",
+        "mysql",
+        "database"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Flyway runs all migrations cleanly on dev startup",
+          "given": "the MySQL container is running and the underwriting-service starts with the dev profile",
+          "when": "Flyway executes",
+          "then": "all four migration scripts apply in order without errors and the flyway_schema_history table records each as success"
+        },
+        {
+          "scenario": "Schema matches JPA entity expectations",
+          "given": "migrations have been applied",
+          "when": "the underwriting-service starts with ddl-auto set to validate",
+          "then": "Hibernate validates all entity mappings against the schema without throwing a validation exception"
+        },
+        {
+          "scenario": "Migrations execute against H2 in test profile and entities validate",
+          "given": "the test profile is active with Flyway enabled against H2 and ddl-auto set to validate",
+          "when": "mvnw test is executed",
+          "then": "Flyway runs all migration scripts against H2 without error and Hibernate validates all entity mappings against the migrated schema"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create V1__create_underwriting_cases.sql",
+          "description": "Define the underwriting_cases table:\n\n- underwriting_case_id BIGINT AUTO_INCREMENT PRIMARY KEY\n- application_id BIGINT NOT NULL\n- case_status VARCHAR(50) NOT NULL\n- decision_status VARCHAR(50) NULL\n- decision_reason VARCHAR(500) NULL\n- manual_review_required BOOLEAN NOT NULL DEFAULT FALSE\n- created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n- completed_at TIMESTAMP NULL\n\nConstraints:\n- UNIQUE on application_id (one active case per application)\n\nIndexes:\n- INDEX on case_status\n- INDEX on decision_status\n\nH2 compatibility: omit ENGINE=InnoDB and DEFAULT CHARSET clauses. Do not use ON UPDATE CURRENT_TIMESTAMP."
+        },
+        {
+          "summary": "Create V2__create_underwriting_checks.sql",
+          "description": "Define the underwriting_checks table:\n\n- check_id BIGINT AUTO_INCREMENT PRIMARY KEY\n- underwriting_case_id BIGINT NOT NULL\n- check_type VARCHAR(50) NOT NULL\n- check_status VARCHAR(30) NOT NULL\n- result_code VARCHAR(50) NULL\n- result_summary VARCHAR(255) NULL\n- executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n\nConstraints:\n- FOREIGN KEY (underwriting_case_id) REFERENCES underwriting_cases(underwriting_case_id)\n\nIndexes:\n- INDEX on underwriting_case_id\n- INDEX on check_type\n\nH2 compatibility: omit ENGINE=InnoDB and DEFAULT CHARSET clauses."
+        },
+        {
+          "summary": "Create V3__create_underwriting_decisions.sql",
+          "description": "Define the underwriting_decisions table. Keep as one-to-many to preserve re-evaluation and manual override history:\n\n- decision_id BIGINT AUTO_INCREMENT PRIMARY KEY\n- underwriting_case_id BIGINT NOT NULL\n- decision_type VARCHAR(50) NOT NULL\n- recommended_amount DECIMAL(15,2) NULL\n- recommended_term_months INT NULL\n- decision_source VARCHAR(30) NOT NULL\n- decided_by_user_id BIGINT NULL\n- decision_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n\nConstraints:\n- FOREIGN KEY (underwriting_case_id) REFERENCES underwriting_cases(underwriting_case_id)\n\nIndexes:\n- INDEX on underwriting_case_id\n- INDEX on decision_at\n\nH2 compatibility: omit ENGINE=InnoDB and DEFAULT CHARSET clauses."
+        },
+        {
+          "summary": "Create V4__create_manual_review_notes.sql",
+          "description": "Define the manual_review_notes table:\n\n- review_note_id BIGINT AUTO_INCREMENT PRIMARY KEY\n- underwriting_case_id BIGINT NOT NULL\n- reviewer_user_id BIGINT NOT NULL\n- note_text VARCHAR(1000) NOT NULL\n- created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n\nConstraints:\n- FOREIGN KEY (underwriting_case_id) REFERENCES underwriting_cases(underwriting_case_id)\n\nIndexes:\n- INDEX on underwriting_case_id\n- INDEX on created_at\n\nH2 compatibility: omit ENGINE=InnoDB and DEFAULT CHARSET clauses."
+        }
+      ]
+    },
+    {
+      "summary": "Create UnderwritingCase and UnderwritingCheck JPA entities and repositories",
+      "description": "Implement the UnderwritingCase and UnderwritingCheck JPA entities mapped to their respective tables, along with supporting enums and Spring Data repositories. UnderwritingCase is the aggregate root for the underwriting service — all checks, decisions, and review notes belong to a case. All field names, column mappings, and constraints must align with the V1 and V2 Flyway migrations.",
+      "labels": [
+        "underwriting-service",
+        "jpa",
+        "entity",
+        "repository",
+        "underwriting-case"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "UnderwritingCase and UnderwritingCheck validate against migrated schema",
+          "given": "Flyway migrations have run and ddl-auto is set to validate",
+          "when": "the underwriting-service starts",
+          "then": "Hibernate validates both entities against their tables without error"
+        },
+        {
+          "scenario": "A case can be persisted and its checks retrieved",
+          "given": "an UnderwritingCase is saved",
+          "when": "UnderwritingCheck records are saved referencing the case and the case is reloaded",
+          "then": "all associated checks are retrievable by underwriting_case_id"
+        },
+        {
+          "scenario": "Unique constraint prevents duplicate cases for the same application",
+          "given": "an UnderwritingCase already exists for a given application_id",
+          "when": "a second UnderwritingCase is saved with the same application_id",
+          "then": "a DataIntegrityViolationException is thrown"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create CaseStatus, DecisionStatus, CheckType, and CheckStatus enums",
+          "description": "Create enums under com.loanflow.underwritingservice.entity.enums:\n\nCaseStatus: OPEN, IN_PROGRESS, COMPLETED, FAILED\n\nDecisionStatus: APPROVED, REJECTED, MANUAL_REVIEW\n\nCheckType: DEBT_TO_INCOME, INCOME_SUFFICIENCY, FRAUD_FLAG, CREDIT_SCORE\n\nCheckStatus: PENDING, PASSED, FAILED\n\nAnnotate with @Enumerated(EnumType.STRING) where used in entities."
+        },
+        {
+          "summary": "Create UnderwritingCase JPA entity",
+          "description": "Create com.loanflow.underwritingservice.entity.UnderwritingCase mapped to the underwriting_cases table:\n\n- @Id @GeneratedValue underwritingCaseId\n- applicationId (BIGINT, unique)\n- caseStatus (@Enumerated STRING)\n- decisionStatus (@Enumerated STRING, nullable)\n- decisionReason (VARCHAR 500, nullable)\n- manualReviewRequired (BOOLEAN, default false)\n- createdAt (@CreationTimestamp, updatable = false)\n- completedAt (nullable)\n- checks: @OneToMany(mappedBy = \"underwritingCase\", fetch = LAZY, cascade = ALL)\n- decisions: @OneToMany(mappedBy = \"underwritingCase\", fetch = LAZY, cascade = ALL)\n- reviewNotes: @OneToMany(mappedBy = \"underwritingCase\", fetch = LAZY, cascade = ALL)\n\nAnnotate with @Entity, @Table(name = \"underwriting_cases\"), @Getter, @Setter, @NoArgsConstructor, @Builder."
+        },
+        {
+          "summary": "Create UnderwritingCheck entity and repository",
+          "description": "Create com.loanflow.underwritingservice.entity.UnderwritingCheck mapped to underwriting_checks:\n\n- @Id @GeneratedValue checkId\n- @ManyToOne @JoinColumn(name = \"underwriting_case_id\") underwritingCase\n- checkType (@Enumerated STRING)\n- checkStatus (@Enumerated STRING)\n- resultCode (VARCHAR 50, nullable)\n- resultSummary (VARCHAR 255, nullable)\n- executedAt (@CreationTimestamp, updatable = false)\n\nAnnotate with @Entity, @Table(name = \"underwriting_checks\"), @Getter, @Setter, @NoArgsConstructor, @Builder.\n\nCreate UnderwritingCaseRepository extending JpaRepository<UnderwritingCase, Long>:\n- findByApplicationId(Long applicationId) returning Optional<UnderwritingCase>\n- existsByApplicationId(Long applicationId) returning boolean\n- findByCaseStatus(CaseStatus status) returning List<UnderwritingCase>\n\nCreate UnderwritingCheckRepository extending JpaRepository<UnderwritingCheck, Long>:\n- findByUnderwritingCase_UnderwritingCaseId(Long caseId) returning List<UnderwritingCheck>\n- findByUnderwritingCase_UnderwritingCaseIdAndCheckType(Long caseId, CheckType type) returning Optional<UnderwritingCheck>"
+        }
+      ]
+    },
+    {
+      "summary": "Create UnderwritingDecision and ManualReviewNote JPA entities and repositories",
+      "description": "Implement the UnderwritingDecision and ManualReviewNote JPA entities mapped to their respective tables. UnderwritingDecision is modelled as one-to-many to preserve the full history of re-evaluations and manual overrides. ManualReviewNote is append-only. All mappings must align with the V3 and V4 Flyway migrations.",
+      "labels": [
+        "underwriting-service",
+        "jpa",
+        "entity",
+        "repository",
+        "decision",
+        "manual-review"
+      ],
+      "priority": "High",
+      "storyPoints": 2,
+      "acceptanceCriteria": [
+        {
+          "scenario": "UnderwritingDecision and ManualReviewNote validate against migrated schema",
+          "given": "all four Flyway migrations have run and ddl-auto is validate",
+          "when": "the underwriting-service starts",
+          "then": "Hibernate validates both entities without error"
+        },
+        {
+          "scenario": "Multiple decisions are preserved for the same case",
+          "given": "an UnderwritingCase has been through automated evaluation and a manual override",
+          "when": "decisions are queried for the case",
+          "then": "both decision records are returned ordered by decision_at, preserving full history"
+        },
+        {
+          "scenario": "ManualReviewNote records are append-only",
+          "given": "a ManualReviewNote has been saved",
+          "when": "the repository is used to add a second note for the same case",
+          "then": "both notes exist and neither is modified in place"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create DecisionType and DecisionSource enums",
+          "description": "Create enums under com.loanflow.underwritingservice.entity.enums:\n\nDecisionType: APPROVED, REJECTED, MANUAL_APPROVAL\n\nDecisionSource: AUTOMATED, MANUAL_REVIEW\n\nAnnotate with @Enumerated(EnumType.STRING) where used in entities."
+        },
+        {
+          "summary": "Create UnderwritingDecision entity and repository",
+          "description": "Create com.loanflow.underwritingservice.entity.UnderwritingDecision mapped to underwriting_decisions:\n\n- @Id @GeneratedValue decisionId\n- @ManyToOne @JoinColumn(name = \"underwriting_case_id\") underwritingCase\n- decisionType (@Enumerated STRING)\n- recommendedAmount (DECIMAL 15,2, nullable)\n- recommendedTermMonths (INT, nullable)\n- decisionSource (@Enumerated STRING)\n- decidedByUserId (BIGINT, nullable — null for automated decisions)\n- decisionAt (@CreationTimestamp, updatable = false)\n\nAnnotate with @Entity, @Table(name = \"underwriting_decisions\"), @Getter, @Setter, @NoArgsConstructor, @Builder.\n\nCreate UnderwritingDecisionRepository extending JpaRepository<UnderwritingDecision, Long>:\n- findByUnderwritingCase_UnderwritingCaseIdOrderByDecisionAtAsc(Long caseId) returning List<UnderwritingDecision>\n- findTopByUnderwritingCase_UnderwritingCaseIdOrderByDecisionAtDesc(Long caseId) returning Optional<UnderwritingDecision>"
+        },
+        {
+          "summary": "Create ManualReviewNote entity and repository",
+          "description": "Create com.loanflow.underwritingservice.entity.ManualReviewNote mapped to manual_review_notes. This entity is append-only — no update operations should be performed:\n\n- @Id @GeneratedValue reviewNoteId\n- @ManyToOne @JoinColumn(name = \"underwriting_case_id\") underwritingCase\n- reviewerUserId (BIGINT)\n- noteText (VARCHAR 1000)\n- createdAt (@CreationTimestamp, updatable = false)\n\nAnnotate with @Entity, @Table(name = \"manual_review_notes\"), @Getter, @NoArgsConstructor, @Builder.\n\nCreate ManualReviewNoteRepository extending JpaRepository<ManualReviewNote, Long>:\n- findByUnderwritingCase_UnderwritingCaseIdOrderByCreatedAtAsc(Long caseId) returning List<ManualReviewNote>"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,226 @@
+{
+  "summary": "Loan Application Service — Data Layer Foundation",
+  "description": "Establish the complete data persistence layer for the loan-service. This epic covers all configuration, schema, and ORM work required before any REST endpoints or business logic can be built. It spans service profile configuration, Flyway-managed schema creation, JPA entity mapping, repository setup, and the test infrastructure needed to validate migration and entity alignment without requiring a running database.\n\nStories in this epic are sourced from:\n- story-application-properties.json\n- stories-loan-application-schema.json (migrations, root entity, child entities)\n\nThe Docker Compose MySQL infrastructure story is excluded — it is tracked under a separate infrastructure epic.",
+  "labels": [
+    "loan-service",
+    "data-layer",
+    "jpa",
+    "flyway",
+    "schema",
+    "mysql",
+    "sprint-2",
+    "module-3"
+  ],
+  "priority": "High",
+  "userType": "backend developer owning the Loan Application Service",
+  "functionality": "configure the service's data layer including database connectivity, schema migrations, JPA entities, and test infrastructure",
+  "benefit": "so the loan application service has a reliable, validated persistence foundation that downstream REST and event-driven features can build on without schema drift between environments",
+  "stories": [
+    {
+      "summary": "Configure application properties across base, dev, and test profiles for loan-service",
+      "description": "The loan-service has a minimal application.yaml with a misconfigured management block (nested under spring.application instead of spring), an empty application-dev.yaml, and an empty application-test.yaml. This story adds the required Maven dependencies, defines environment variables for database connectivity, and fills in JPA, Flyway, logging, and actuator settings needed across profiles so the service can start, connect to the database, run migrations, and be tested in isolation.",
+      "labels": [
+        "configuration",
+        "jpa",
+        "flyway",
+        "mysql",
+        "loan-service",
+        "spring-boot",
+        "profiles"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Base application.yaml has correct actuator and logging configuration",
+          "given": "the loan-service is started with any profile",
+          "when": "GET /actuator/health is called",
+          "then": "the response includes full health details and the management block is correctly scoped under spring, not spring.application"
+        },
+        {
+          "scenario": "Service starts and runs Flyway migrations on dev profile",
+          "given": "the MySQL container is running and environment variables are set from .env",
+          "when": "the loan-service starts with the dev profile",
+          "then": "Flyway runs migration scripts from classpath:db/migration and JPA validates the schema without attempting to auto-create tables"
+        },
+        {
+          "scenario": "Tests run Flyway migrations against H2 and validate entity mappings",
+          "given": "the test profile is active and no MySQL instance is running",
+          "when": "mvnw test is executed",
+          "then": "Flyway runs all migration scripts against H2 in-memory, Hibernate validates entity mappings against the migrated schema, and the context loads without error"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add JPA, MySQL, Flyway, Validation, and H2 dependencies to pom.xml",
+          "description": "Add the following dependencies to the loan-service pom.xml:\n\n- spring-boot-starter-data-jpa (ORM and repository support)\n- spring-boot-starter-validation (bean validation for request DTOs)\n- mysql-connector-j (MySQL JDBC driver, runtime scope)\n- flyway-core (database migration engine)\n- com.h2database:h2 (in-memory database, test scope only)\n\nEnsure mysql-connector-j and flyway-core use versions compatible with Spring Boot 3.5.13."
+        },
+        {
+          "summary": "Add database environment variables to infra/.env.example",
+          "description": "Populate infra/.env.example with all environment variables required to configure the loan-service datasource. Each connection part is defined as a separate variable:\n\nDATABASE_HOST=localhost\nDATABASE_PORT=3306\nDATABASE_NAME=loanflow_loan_db\nDATABASE_USER=loanflow\nDATABASE_PASSWORD=password\nMYSQL_ROOT_PASSWORD=rootpassword\n\nThis file is committed. Developers copy it to infra/.env locally. The actual .env is covered by infra/.gitignore."
+        },
+        {
+          "summary": "Fix and expand base application.yaml",
+          "description": "Correct the indentation bug where management is nested under spring.application instead of spring. Expand the actuator exposure to include health, info, and metrics. Add a base logging configuration:\n\nspring:\n  application:\n    name: loan-service\n\nmanagement:\n  endpoints:\n    web:\n      exposure:\n        include: health, info, metrics\n  endpoint:\n    health:\n      show-details: always\n\nlogging:\n  level:\n    root: INFO\n    com.loanflow: DEBUG"
+        },
+        {
+          "summary": "Configure datasource, JPA, and Flyway in application-dev.yaml",
+          "description": "Populate application-dev.yaml with server port, datasource, JPA, and Flyway configuration. Each part of the datasource URL must be substituted individually from environment variables with inline defaults:\n\nserver:\n  port: 8082\n\nspring:\n  datasource:\n    url: jdbc:mysql://${DATABASE_HOST:localhost}:${DATABASE_PORT:3306}/${DATABASE_NAME:loanflow_loan_db}\n    username: ${DATABASE_USER:loanflow}\n    password: ${DATABASE_PASSWORD:password}\n  jpa:\n    hibernate:\n      ddl-auto: validate\n    show-sql: true\n    properties:\n      hibernate:\n        dialect: org.hibernate.dialect.MySQLDialect\n        format_sql: true\n  flyway:\n    enabled: true\n    locations: classpath:db/migration"
+        },
+        {
+          "summary": "Configure application-test.yaml to run Flyway against H2 with schema validation",
+          "description": "Populate application-test.yaml so tests run Flyway migrations against H2 in-memory and then validate entity mappings against the migrated schema. This ensures migration scripts and JPA entities stay in sync without requiring MySQL or Docker.\n\nspring:\n  datasource:\n    url: jdbc:h2:mem:loanflow_test;DB_CLOSE_DELAY=-1;MODE=MySQL;NON_KEYWORDS=VALUE\n    driver-class-name: org.h2.Driver\n    username: sa\n    password:\n  jpa:\n    hibernate:\n      ddl-auto: validate\n    show-sql: true\n  flyway:\n    enabled: true\n    locations: classpath:db/migration\n\nNote: migration SQL in db/migration must be written to be H2-compatible. Avoid MySQL-specific DDL such as ON UPDATE CURRENT_TIMESTAMP and ENGINE=InnoDB. These clauses must be omitted or conditionally excluded so migrations execute cleanly on both MySQL and H2."
+        }
+      ]
+    },
+    {
+      "summary": "Create Flyway migration scripts for loan application schema",
+      "description": "Write the initial SQL migration scripts that define the loan application service database schema. Migrations run in order via Flyway on service startup against MySQL 8 (dev) and against H2 in MySQL mode (test). Because both targets must execute the same scripts, all SQL must be written to the common subset: avoid ON UPDATE CURRENT_TIMESTAMP, ENGINE=InnoDB, and any MySQL-specific index syntax not supported by H2. Each table is defined in its own versioned migration file under src/main/resources/db/migration.",
+      "labels": [
+        "loan-service",
+        "flyway",
+        "schema",
+        "mysql",
+        "database"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Flyway runs all migrations cleanly on dev startup",
+          "given": "the MySQL container is running and the loan-service starts with the dev profile",
+          "when": "Flyway executes",
+          "then": "all four migration scripts apply in order without errors and the flyway_schema_history table records each as success"
+        },
+        {
+          "scenario": "Schema matches JPA entity expectations",
+          "given": "migrations have been applied",
+          "when": "the loan-service starts with ddl-auto set to validate",
+          "then": "Hibernate validates all entity mappings against the schema without throwing a validation exception"
+        },
+        {
+          "scenario": "Migrations execute against H2 in test profile and entities validate",
+          "given": "the test profile is active with Flyway enabled against H2 and ddl-auto set to validate",
+          "when": "mvnw test is executed",
+          "then": "Flyway runs all migration scripts against H2 without error and Hibernate validates all entity mappings against the migrated schema"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create V1__create_loan_applications.sql",
+          "description": "Define the loan_applications table with all core fields:\n\n- application_id BIGINT AUTO_INCREMENT PRIMARY KEY\n- application_reference VARCHAR(50) NOT NULL UNIQUE\n- applicant_user_id BIGINT NOT NULL\n- assigned_officer_user_id BIGINT NULL\n- loan_type VARCHAR(50) NOT NULL\n- requested_amount DECIMAL(15,2) NOT NULL\n- term_months INT NOT NULL\n- annual_income DECIMAL(15,2) NOT NULL\n- employment_status VARCHAR(50) NOT NULL\n- status VARCHAR(50) NOT NULL\n- submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n- updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP\n\nIndexes:\n- UNIQUE on application_reference\n- INDEX on applicant_user_id\n- INDEX on assigned_officer_user_id\n- INDEX on status\n- COMPOSITE INDEX on (status, submitted_at)\n\nH2 compatibility: omit ENGINE=InnoDB and DEFAULT CHARSET clauses. Use TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP for submitted_at and updated_at — do not use ON UPDATE CURRENT_TIMESTAMP (not supported by H2; updated_at will be managed by Hibernate @UpdateTimestamp instead)."
+        },
+        {
+          "summary": "Create V2__create_application_addresses.sql",
+          "description": "Define the application_addresses table:\n\n- address_id BIGINT AUTO_INCREMENT PRIMARY KEY\n- application_id BIGINT NOT NULL\n- address_type VARCHAR(30) NOT NULL\n- line1 VARCHAR(255) NOT NULL\n- line2 VARCHAR(255) NULL\n- city VARCHAR(100) NOT NULL\n- state_code VARCHAR(20) NOT NULL\n- postal_code VARCHAR(20) NOT NULL\n- country_code VARCHAR(10) NOT NULL DEFAULT 'CA'\n\nConstraints:\n- FOREIGN KEY (application_id) REFERENCES loan_applications(application_id)\n\nIndexes:\n- INDEX on application_id\n- COMPOSITE INDEX on (application_id, address_type)\n\nH2 compatibility: omit ENGINE=InnoDB and DEFAULT CHARSET clauses."
+        },
+        {
+          "summary": "Create V3__create_application_employment_details.sql",
+          "description": "Define the application_employment_details table. Treated as one current employment record per application, enforced with a unique constraint:\n\n- employment_detail_id BIGINT AUTO_INCREMENT PRIMARY KEY\n- application_id BIGINT NOT NULL UNIQUE\n- employer_name VARCHAR(255) NOT NULL\n- job_title VARCHAR(150) NOT NULL\n- employment_type VARCHAR(50) NOT NULL\n- monthly_income DECIMAL(15,2) NOT NULL\n- years_employed DECIMAL(4,1) NOT NULL\n\nConstraints:\n- FOREIGN KEY (application_id) REFERENCES loan_applications(application_id)\n- UNIQUE on application_id (one employment record per application)\n\nH2 compatibility: omit ENGINE=InnoDB and DEFAULT CHARSET clauses."
+        },
+        {
+          "summary": "Create V4__create_application_status_history.sql",
+          "description": "Define the application_status_history table as an append-only audit of status transitions:\n\n- status_history_id BIGINT AUTO_INCREMENT PRIMARY KEY\n- application_id BIGINT NOT NULL\n- previous_status VARCHAR(50) NULL\n- new_status VARCHAR(50) NOT NULL\n- changed_by_user_id BIGINT NOT NULL\n- change_reason VARCHAR(255) NULL\n- changed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n\nConstraints:\n- FOREIGN KEY (application_id) REFERENCES loan_applications(application_id)\n\nIndexes:\n- INDEX on application_id\n- INDEX on changed_at\n\nH2 compatibility: omit ENGINE=InnoDB and DEFAULT CHARSET clauses. Use DEFAULT CURRENT_TIMESTAMP for changed_at — do not use ON UPDATE CURRENT_TIMESTAMP."
+        }
+      ]
+    },
+    {
+      "summary": "Create LoanApplication root entity and repository",
+      "description": "Implement the LoanApplication JPA entity and its supporting enums mapped to the loan_applications table. This is the aggregate root for the loan application service. All field names, column mappings, and constraints must align with the V1 Flyway migration. Create the Spring Data JPA repository with query methods needed for the search and filtering use cases.",
+      "labels": [
+        "loan-service",
+        "jpa",
+        "entity",
+        "repository",
+        "loan-application"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "LoanApplication entity validates against the migrated schema",
+          "given": "Flyway migrations have run and ddl-auto is set to validate",
+          "when": "the loan-service starts",
+          "then": "Hibernate validates LoanApplication against loan_applications without error"
+        },
+        {
+          "scenario": "Repository can persist and retrieve a loan application",
+          "given": "a valid LoanApplication entity is constructed",
+          "when": "it is saved via LoanApplicationRepository",
+          "then": "it is persisted and can be retrieved by application_id and by application_reference"
+        },
+        {
+          "scenario": "Repository supports status and loan type filtering",
+          "given": "multiple loan applications exist with varying statuses and loan types",
+          "when": "the repository is queried with a status and loan type filter",
+          "then": "only matching records are returned in a paginated result"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create LoanStatus, LoanType, and EmploymentStatus enums",
+          "description": "Create enums under the package com.loanflow.loanservice.entity.enums:\n\nLoanStatus: SUBMITTED, PENDING_DOCUMENTS, UNDERWRITING_IN_PROGRESS, APPROVED, REJECTED\n\nLoanType: PERSONAL, AUTO, MORTGAGE, BUSINESS\n\nEmploymentStatus: FULL_TIME, PART_TIME, SELF_EMPLOYED, UNEMPLOYED, RETIRED\n\nAnnotate with @Enumerated(EnumType.STRING) where used in entities to store the string value rather than ordinal."
+        },
+        {
+          "summary": "Create LoanApplication JPA entity",
+          "description": "Create com.loanflow.loanservice.entity.LoanApplication mapped to the loan_applications table:\n\n- @Id @GeneratedValue applicationId\n- applicationReference (unique, non-updatable)\n- applicantUserId (BIGINT, not null)\n- assignedOfficerUserId (BIGINT, nullable)\n- loanType (@Enumerated STRING)\n- requestedAmount (DECIMAL 15,2)\n- termMonths (INT)\n- annualIncome (DECIMAL 15,2)\n- employmentStatus (@Enumerated STRING)\n- status (@Enumerated STRING, default SUBMITTED)\n- submittedAt (@CreationTimestamp)\n- updatedAt (@UpdateTimestamp)\n\nAnnotate with @Entity, @Table(name = \"loan_applications\"), @Getter, @Setter, @NoArgsConstructor, @Builder from Lombok."
+        },
+        {
+          "summary": "Create LoanApplicationRepository",
+          "description": "Create com.loanflow.loanservice.repository.LoanApplicationRepository extending JpaRepository<LoanApplication, Long>.\n\nInclude the following query methods:\n- findByApplicationReference(String reference) returning Optional<LoanApplication>\n- findByApplicantUserId(Long userId) returning List<LoanApplication>\n- findAllByStatusAndLoanType(LoanStatus status, LoanType loanType, Pageable pageable) returning Page<LoanApplication>\n- existsByApplicantUserIdAndLoanTypeAndStatusIn(Long userId, LoanType loanType, List<LoanStatus> statuses) returning boolean (used for duplicate application check)"
+        }
+      ]
+    },
+    {
+      "summary": "Create child entities and repositories for loan application",
+      "description": "Implement the three child JPA entities — ApplicationAddress, ApplicationEmploymentDetails, and ApplicationStatusHistory — mapped to their respective Flyway-migrated tables. Each entity references LoanApplication as its parent. ApplicationStatusHistory is append-only and should never be updated in place. All mappings must align with V2, V3, and V4 migrations.",
+      "labels": [
+        "loan-service",
+        "jpa",
+        "entity",
+        "repository",
+        "schema"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Child entities validate against migrated schema",
+          "given": "all four Flyway migrations have run and ddl-auto is validate",
+          "when": "the loan-service starts",
+          "then": "Hibernate validates all three child entities without error"
+        },
+        {
+          "scenario": "Address and employment details are persisted with a loan application",
+          "given": "a LoanApplication is saved",
+          "when": "an ApplicationAddress and ApplicationEmploymentDetails are saved referencing its ID",
+          "then": "both records are retrievable by application_id and the foreign key constraint is satisfied"
+        },
+        {
+          "scenario": "Status history records are appended on each transition",
+          "given": "a LoanApplication exists with status SUBMITTED",
+          "when": "a status transition is recorded",
+          "then": "a new ApplicationStatusHistory row is inserted capturing the previous status, new status, actor, and timestamp without modifying existing history rows"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create AddressType and EmploymentType enums",
+          "description": "Create enums under com.loanflow.loanservice.entity.enums:\n\nAddressType: CURRENT, PREVIOUS, MAILING\n\nEmploymentType: FULL_TIME, PART_TIME, CONTRACT, SELF_EMPLOYED\n\nAnnotate with @Enumerated(EnumType.STRING) where used in entities."
+        },
+        {
+          "summary": "Create ApplicationAddress entity and repository",
+          "description": "Create com.loanflow.loanservice.entity.ApplicationAddress mapped to application_addresses:\n\n- @Id @GeneratedValue addressId\n- @ManyToOne @JoinColumn(name = \"application_id\") loanApplication\n- addressType (@Enumerated STRING)\n- line1, line2 (nullable), city, stateCode, postalCode, countryCode\n\nCreate ApplicationAddressRepository extending JpaRepository<ApplicationAddress, Long> with:\n- findByLoanApplication_ApplicationId(Long applicationId) returning List<ApplicationAddress>"
+        },
+        {
+          "summary": "Create ApplicationEmploymentDetails entity and repository",
+          "description": "Create com.loanflow.loanservice.entity.ApplicationEmploymentDetails mapped to application_employment_details. Enforce one record per application using a unique constraint on application_id:\n\n- @Id @GeneratedValue employmentDetailId\n- @OneToOne @JoinColumn(name = \"application_id\", unique = true) loanApplication\n- employerName, jobTitle\n- employmentType (@Enumerated STRING)\n- monthlyIncome (DECIMAL 15,2)\n- yearsEmployed (DECIMAL 4,1)\n\nCreate ApplicationEmploymentDetailsRepository extending JpaRepository<ApplicationEmploymentDetails, Long> with:\n- findByLoanApplication_ApplicationId(Long applicationId) returning Optional<ApplicationEmploymentDetails>"
+        },
+        {
+          "summary": "Create ApplicationStatusHistory entity and repository",
+          "description": "Create com.loanflow.loanservice.entity.ApplicationStatusHistory mapped to application_status_history. This entity is append-only — no update operations should be performed on it:\n\n- @Id @GeneratedValue statusHistoryId\n- @ManyToOne @JoinColumn(name = \"application_id\") loanApplication\n- previousStatus (@Enumerated STRING, nullable — null on initial SUBMITTED entry)\n- newStatus (@Enumerated STRING)\n- changedByUserId (BIGINT)\n- changeReason (VARCHAR, nullable)\n- changedAt (@CreationTimestamp, updatable = false)\n\nCreate ApplicationStatusHistoryRepository extending JpaRepository<ApplicationStatusHistory, Long> with:\n- findByLoanApplication_ApplicationIdOrderByChangedAtAsc(Long applicationId) returning List<ApplicationStatusHistory>"
+        }
+      ]
+    }
+  ]
+}

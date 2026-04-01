@@ -1,0 +1,224 @@
+{
+  "summary": "Identity Service — Data Layer Foundation",
+  "description": "Establish the complete data persistence layer for the identity-service. This epic covers all configuration, schema, and ORM work required before authentication and authorization features can be built. It spans service profile configuration, Flyway-managed schema creation for users, roles, user_roles, and refresh_tokens, JPA entity mapping including composite key modeling for the user_roles junction table, repository setup, and the test infrastructure needed to validate migration and entity alignment without requiring a running database.\n\nStories in this epic are sourced from:\n- story-identity-application-properties.json\n- stories-identity-schema.json (migrations, User and Role entities, UserRole and RefreshToken entities)\n\nThe Docker Compose MySQL infrastructure story is excluded — it is tracked under a separate infrastructure epic.",
+  "labels": [
+    "identity-service",
+    "data-layer",
+    "jpa",
+    "flyway",
+    "schema",
+    "mysql",
+    "sprint-2",
+    "module-2"
+  ],
+  "priority": "High",
+  "userType": "backend developer owning the Identity and Access Service",
+  "functionality": "configure the service's data layer including database connectivity, schema migrations, JPA entities for users, roles, and token management, and test infrastructure",
+  "benefit": "so the identity service has a validated persistence foundation that authentication, authorization, and token management features can build on without schema drift between environments",
+  "stories": [
+    {
+      "summary": "Configure application properties across base, dev, and test profiles for identity-service",
+      "description": "The identity-service is scaffolded with actuator and base profile files in place. This story adds the required Maven dependencies for persistence, migration, and validation, defines environment variables for the identity database, and populates application-dev.yaml and application-test.yaml so the service can start, connect to MySQL, run Flyway migrations, and run tests in isolation against H2 without requiring a running database instance.\n\nNote: infra/mysql/init/01_init.sql must be updated to provision the loanflow_identity_db database and grant the application user access. This depends on the Docker Compose MySQL infrastructure story.",
+      "labels": [
+        "identity-service",
+        "configuration",
+        "jpa",
+        "flyway",
+        "mysql",
+        "spring-boot",
+        "profiles"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Service starts and runs Flyway migrations on dev profile",
+          "given": "the MySQL container is running and environment variables are set from .env",
+          "when": "the identity-service starts with the dev profile",
+          "then": "Flyway runs migration scripts from classpath:db/migration against loanflow_identity_db and JPA validates the schema without attempting to auto-create tables"
+        },
+        {
+          "scenario": "Tests run Flyway migrations against H2 and validate entity mappings",
+          "given": "the test profile is active and no MySQL instance is running",
+          "when": "mvnw test is executed",
+          "then": "Flyway runs all migration scripts against H2 in-memory, Hibernate validates entity mappings against the migrated schema, and the context loads without error"
+        },
+        {
+          "scenario": "No credentials are hardcoded in source",
+          "given": "a developer inspects application-dev.yaml",
+          "when": "they review the datasource configuration",
+          "then": "all connection values are resolved from environment variables with inline defaults and no plaintext credentials appear in committed files"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add JPA, MySQL, Flyway, Validation, and H2 dependencies to pom.xml",
+          "description": "Add the following dependencies to the identity-service pom.xml:\n\n- spring-boot-starter-data-jpa\n- spring-boot-starter-validation\n- mysql-connector-j (runtime scope)\n- flyway-core\n- com.h2database:h2 (test scope only)\n\nEnsure versions are compatible with Spring Boot 3.5.13."
+        },
+        {
+          "summary": "Add identity database environment variables to infra/.env.example",
+          "description": "Append identity-service database variables to infra/.env.example under a labelled comment block:\n\n# Identity Service\nIDENTITY_DB_NAME=loanflow_identity_db\n\nThe shared DATABASE_HOST, DATABASE_PORT, DATABASE_USER, DATABASE_PASSWORD, and MYSQL_ROOT_PASSWORD variables are reused from the base MySQL block. Only the database name requires a service-specific variable.\n\nAlso update infra/mysql/init/01_init.sql to provision the identity database:\nCREATE DATABASE IF NOT EXISTS loanflow_identity_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\nGRANT ALL PRIVILEGES ON loanflow_identity_db.* TO '${DATABASE_USER}'@'%';\nFLUSH PRIVILEGES;"
+        },
+        {
+          "summary": "Configure datasource, JPA, and Flyway in application-dev.yaml",
+          "description": "Populate application-dev.yaml with server port, datasource, JPA, and Flyway settings. Each connection part must use environment variable substitution with inline defaults:\n\nserver:\n  port: 8081\n\nspring:\n  datasource:\n    url: jdbc:mysql://${DATABASE_HOST:localhost}:${DATABASE_PORT:3306}/${IDENTITY_DB_NAME:loanflow_identity_db}\n    username: ${DATABASE_USER:loanflow}\n    password: ${DATABASE_PASSWORD:password}\n  jpa:\n    hibernate:\n      ddl-auto: validate\n    show-sql: true\n    properties:\n      hibernate:\n        dialect: org.hibernate.dialect.MySQLDialect\n        format_sql: true\n  flyway:\n    enabled: true\n    locations: classpath:db/migration"
+        },
+        {
+          "summary": "Configure application-test.yaml to run Flyway against H2 with schema validation",
+          "description": "Populate application-test.yaml so tests run Flyway migrations against H2 in-memory and validate entity mappings against the migrated schema without requiring MySQL or Docker:\n\nspring:\n  datasource:\n    url: jdbc:h2:mem:loanflow_identity_test;DB_CLOSE_DELAY=-1;MODE=MySQL;NON_KEYWORDS=VALUE\n    driver-class-name: org.h2.Driver\n    username: sa\n    password:\n  jpa:\n    hibernate:\n      ddl-auto: validate\n    show-sql: true\n  flyway:\n    enabled: true\n    locations: classpath:db/migration\n\nNote: migration SQL must be written to the H2-compatible subset. Avoid ON UPDATE CURRENT_TIMESTAMP and ENGINE=InnoDB."
+        }
+      ]
+    },
+    {
+      "summary": "Create Flyway migration scripts for identity service schema",
+      "description": "Write the SQL migration scripts that define the identity service database schema across four tables: users, roles, user_roles, and refresh_tokens. Migrations run in order via Flyway against MySQL 8 in dev and against H2 in MySQL mode in the test profile. All SQL must be written to the common subset supported by both targets: avoid ON UPDATE CURRENT_TIMESTAMP, ENGINE=InnoDB, and MySQL-specific index syntax not supported by H2. Each table is defined in its own versioned file under src/main/resources/db/migration.",
+      "labels": [
+        "identity-service",
+        "flyway",
+        "schema",
+        "mysql",
+        "database"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Flyway runs all migrations cleanly on dev startup",
+          "given": "the MySQL container is running and the identity-service starts with the dev profile",
+          "when": "Flyway executes",
+          "then": "all four migration scripts apply in order without errors and the flyway_schema_history table records each as success"
+        },
+        {
+          "scenario": "Schema matches JPA entity expectations",
+          "given": "migrations have been applied",
+          "when": "the identity-service starts with ddl-auto set to validate",
+          "then": "Hibernate validates all entity mappings against the schema without throwing a validation exception"
+        },
+        {
+          "scenario": "Migrations execute against H2 in test profile and entities validate",
+          "given": "the test profile is active with Flyway enabled against H2 and ddl-auto set to validate",
+          "when": "mvnw test is executed",
+          "then": "Flyway runs all migration scripts against H2 without error and Hibernate validates all entity mappings against the migrated schema"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create V1__create_users.sql",
+          "description": "Define the users table:\n\n- user_id BIGINT AUTO_INCREMENT PRIMARY KEY\n- username VARCHAR(150) NOT NULL\n- email VARCHAR(255) NOT NULL\n- password_hash VARCHAR(255) NOT NULL\n- first_name VARCHAR(100) NOT NULL\n- last_name VARCHAR(100) NOT NULL\n- status VARCHAR(30) NOT NULL\n- created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n- updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n\nConstraints:\n- UNIQUE on username\n- UNIQUE on email\n\nIndexes:\n- INDEX on status\n\nH2 compatibility: omit ENGINE=InnoDB and DEFAULT CHARSET clauses. Do not use ON UPDATE CURRENT_TIMESTAMP — updated_at will be managed by Hibernate @UpdateTimestamp."
+        },
+        {
+          "summary": "Create V2__create_roles.sql",
+          "description": "Define the roles table:\n\n- role_id BIGINT AUTO_INCREMENT PRIMARY KEY\n- role_code VARCHAR(50) NOT NULL\n- role_name VARCHAR(100) NOT NULL\n- description VARCHAR(255) NULL\n\nConstraints:\n- UNIQUE on role_code\n\nSeed data — insert the three base roles as part of this migration:\nINSERT INTO roles (role_code, role_name, description) VALUES\n  ('APPLICANT', 'Applicant', 'Loan applicant submitting and tracking applications'),\n  ('LOAN_OFFICER', 'Loan Officer', 'Internal reviewer managing applications and documents'),\n  ('ADMIN', 'Administrator', 'Platform administrator with full access');\n\nH2 compatibility: omit ENGINE=InnoDB and DEFAULT CHARSET clauses."
+        },
+        {
+          "summary": "Create V3__create_user_roles.sql",
+          "description": "Define the user_roles junction table with a composite primary key:\n\n- user_id BIGINT NOT NULL\n- role_id BIGINT NOT NULL\n- assigned_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n\nConstraints:\n- PRIMARY KEY (user_id, role_id)\n- FOREIGN KEY (user_id) REFERENCES users(user_id)\n- FOREIGN KEY (role_id) REFERENCES roles(role_id)\n\nH2 compatibility: omit ENGINE=InnoDB and DEFAULT CHARSET clauses."
+        },
+        {
+          "summary": "Create V4__create_refresh_tokens.sql",
+          "description": "Define the refresh_tokens table:\n\n- refresh_token_id BIGINT AUTO_INCREMENT PRIMARY KEY\n- user_id BIGINT NOT NULL\n- token_value VARCHAR(500) NOT NULL\n- expires_at TIMESTAMP NOT NULL\n- revoked BOOLEAN NOT NULL DEFAULT FALSE\n- created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n\nConstraints:\n- UNIQUE on token_value\n- FOREIGN KEY (user_id) REFERENCES users(user_id)\n\nIndexes:\n- INDEX on user_id\n- INDEX on expires_at\n\nH2 compatibility: omit ENGINE=InnoDB and DEFAULT CHARSET clauses."
+        }
+      ]
+    },
+    {
+      "summary": "Create User and Role JPA entities and repositories",
+      "description": "Implement the User and Role JPA entities mapped to the users and roles tables, along with their supporting enums and Spring Data repositories. User is the aggregate root for the identity service. The many-to-many relationship between User and Role is owned by User via a join table. All field names, column mappings, and constraints must align with the V1 and V2 Flyway migrations.",
+      "labels": [
+        "identity-service",
+        "jpa",
+        "entity",
+        "repository",
+        "user",
+        "role"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "User and Role entities validate against the migrated schema",
+          "given": "Flyway migrations have run and ddl-auto is set to validate",
+          "when": "the identity-service starts",
+          "then": "Hibernate validates User and Role against users and roles without error"
+        },
+        {
+          "scenario": "User can be persisted with roles",
+          "given": "Role records exist from the V2 seed migration",
+          "when": "a User is saved with a role assignment",
+          "then": "the user and the user_roles join record are persisted and retrievable"
+        },
+        {
+          "scenario": "Repository enforces unique constraints",
+          "given": "a User with a given username or email already exists",
+          "when": "a second User is saved with the same username or email",
+          "then": "a DataIntegrityViolationException is thrown"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create UserStatus and RoleCode enums",
+          "description": "Create enums under com.loanflow.identityservice.entity.enums:\n\nUserStatus: ACTIVE, INACTIVE, LOCKED\n\nRoleCode: APPLICANT, LOAN_OFFICER, ADMIN\n\nAnnotate with @Enumerated(EnumType.STRING) where used in entities to persist the string value rather than ordinal."
+        },
+        {
+          "summary": "Create User JPA entity",
+          "description": "Create com.loanflow.identityservice.entity.User mapped to the users table:\n\n- @Id @GeneratedValue userId\n- username (VARCHAR 150, unique, non-updatable)\n- email (VARCHAR 255, unique)\n- passwordHash (VARCHAR 255)\n- firstName, lastName\n- status (@Enumerated STRING)\n- createdAt (@CreationTimestamp, updatable = false)\n- updatedAt (@UpdateTimestamp)\n- roles: @ManyToMany(fetch = FetchType.LAZY) @JoinTable(name = \"user_roles\", joinColumns = @JoinColumn(name = \"user_id\"), inverseJoinColumns = @JoinColumn(name = \"role_id\"))\n\nAnnotate with @Entity, @Table(name = \"users\"), @Getter, @Setter, @NoArgsConstructor, @Builder from Lombok."
+        },
+        {
+          "summary": "Create Role JPA entity",
+          "description": "Create com.loanflow.identityservice.entity.Role mapped to the roles table:\n\n- @Id @GeneratedValue roleId\n- roleCode (@Enumerated STRING, unique)\n- roleName\n- description (nullable)\n\nAnnotate with @Entity, @Table(name = \"roles\"), @Getter, @Setter, @NoArgsConstructor, @Builder from Lombok."
+        },
+        {
+          "summary": "Create UserRepository and RoleRepository",
+          "description": "Create the following repositories under com.loanflow.identityservice.repository:\n\nUserRepository extending JpaRepository<User, Long>:\n- findByUsername(String username) returning Optional<User>\n- findByEmail(String email) returning Optional<User>\n- existsByUsername(String username) returning boolean\n- existsByEmail(String email) returning boolean\n- findByStatus(UserStatus status) returning List<User>\n\nRoleRepository extending JpaRepository<Role, Long>:\n- findByRoleCode(RoleCode roleCode) returning Optional<Role>"
+        }
+      ]
+    },
+    {
+      "summary": "Create UserRole and RefreshToken JPA entities and repositories",
+      "description": "Implement the UserRole entity with a composite key mapping to the user_roles junction table, and the RefreshToken entity mapping to the refresh_tokens table. RefreshToken supports the login, token refresh, logout, and revocation workflow. All mappings must align with the V3 and V4 Flyway migrations.",
+      "labels": [
+        "identity-service",
+        "jpa",
+        "entity",
+        "repository",
+        "refresh-token",
+        "user-roles"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "UserRole and RefreshToken entities validate against migrated schema",
+          "given": "all four Flyway migrations have run and ddl-auto is validate",
+          "when": "the identity-service starts",
+          "then": "Hibernate validates UserRole and RefreshToken without error"
+        },
+        {
+          "scenario": "Refresh token can be issued and revoked",
+          "given": "a User exists in the database",
+          "when": "a RefreshToken is saved and then updated with revoked set to true",
+          "then": "the revocation is persisted and the token is retrievable with revoked equals true"
+        },
+        {
+          "scenario": "Expired and revoked tokens are queryable",
+          "given": "multiple refresh tokens exist with varying expiry and revocation states",
+          "when": "the repository is queried for active tokens for a given user",
+          "then": "only non-revoked, non-expired tokens are returned"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create UserRoleId composite key class",
+          "description": "Create com.loanflow.identityservice.entity.UserRoleId as an @Embeddable composite key:\n\n- userId (BIGINT)\n- roleId (BIGINT)\n\nImplement equals() and hashCode() based on both fields. Annotate with @Embeddable, @Getter, @Setter, @NoArgsConstructor, @AllArgsConstructor, @EqualsAndHashCode from Lombok."
+        },
+        {
+          "summary": "Create UserRole JPA entity",
+          "description": "Create com.loanflow.identityservice.entity.UserRole mapped to the user_roles table:\n\n- @EmbeddedId id (UserRoleId)\n- @ManyToOne @MapsId(\"userId\") @JoinColumn(name = \"user_id\") user\n- @ManyToOne @MapsId(\"roleId\") @JoinColumn(name = \"role_id\") role\n- assignedAt (@CreationTimestamp, updatable = false)\n\nAnnotate with @Entity, @Table(name = \"user_roles\"), @Getter, @NoArgsConstructor, @Builder from Lombok.\n\nCreate UserRoleRepository extending JpaRepository<UserRole, UserRoleId>:\n- findByUser_UserId(Long userId) returning List<UserRole>\n- existsByUser_UserIdAndRole_RoleCode(Long userId, RoleCode roleCode) returning boolean"
+        },
+        {
+          "summary": "Create RefreshToken entity and repository",
+          "description": "Create com.loanflow.identityservice.entity.RefreshToken mapped to the refresh_tokens table:\n\n- @Id @GeneratedValue refreshTokenId\n- @ManyToOne @JoinColumn(name = \"user_id\") user\n- tokenValue (VARCHAR 500, unique)\n- expiresAt (TIMESTAMP, not null)\n- revoked (BOOLEAN, default false)\n- createdAt (@CreationTimestamp, updatable = false)\n\nAnnotate with @Entity, @Table(name = \"refresh_tokens\"), @Getter, @Setter, @NoArgsConstructor, @Builder from Lombok.\n\nCreate RefreshTokenRepository extending JpaRepository<RefreshToken, Long>:\n- findByTokenValue(String tokenValue) returning Optional<RefreshToken>\n- findByUser_UserIdAndRevokedFalseAndExpiresAtAfter(Long userId, Timestamp now) returning List<RefreshToken>\n- revokeAllByUser_UserId(Long userId) — @Modifying @Query to set revoked = true for all tokens belonging to a user (used on logout)"
+        }
+      ]
+    }
+  ]
+}
