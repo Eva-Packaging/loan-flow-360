@@ -17,6 +17,75 @@
   "benefit": "so the identity service has a validated persistence foundation that authentication, authorization, and token management features can build on without schema drift between environments",
   "stories": [
     {
+      "summary": "Scaffold Identity Service with multi-profile configuration and actuator health endpoints",
+      "description": "Initialize the identity-service Spring Boot project following the same structure as gateway-service. The service must define default, dev, and prod configuration profiles with actuator health endpoint configuration per profile. A test package with a context-load smoke test must be included. No actuator configuration is applied in the test profile.",
+      "labels": [
+        "identity-service",
+        "scaffold",
+        "spring-boot",
+        "actuator",
+        "profiles"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Default profile starts with health endpoint only",
+          "given": "the identity-service is started with no active profile",
+          "when": "GET /actuator/health is called",
+          "then": "a 200 response is returned with liveness and readiness probe data; no other actuator endpoints are exposed"
+        },
+        {
+          "scenario": "Dev profile exposes all actuator endpoints with full health details",
+          "given": "the identity-service is started with the dev profile active",
+          "when": "GET /actuator/health is called",
+          "then": "a 200 response is returned with show-details: always and all actuator endpoints are accessible"
+        },
+        {
+          "scenario": "Prod profile file exists and application starts cleanly",
+          "given": "the identity-service is started with the prod profile active",
+          "when": "the application context loads",
+          "then": "the service starts without errors using prod profile overrides"
+        },
+        {
+          "scenario": "Test context loads without actuator configuration",
+          "given": "the Maven test phase is run",
+          "when": "IdentityServiceApplicationTests#contextLoads executes",
+          "then": "the Spring application context loads successfully with no actuator endpoint exposure"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Initialize Maven project with pom.xml",
+          "description": "Create pom.xml under backend/identity-service following the gateway-service model: Spring Boot 3.5.13, Java 17, spring-boot-starter-actuator, spring-boot-starter-web, lombok, spring-boot-starter-test (test scope). Include maven-compiler-plugin with Lombok annotation processor path and spring-boot-maven-plugin with Lombok exclusion."
+        },
+        {
+          "summary": "Create IdentityServiceApplication main class",
+          "description": "Create src/main/java/com/loanflow/identity/IdentityServiceApplication.java annotated with @SpringBootApplication. Package must follow com.loanflow.identity convention, consistent with gateway-service's com.loanflow.gateway."
+        },
+        {
+          "summary": "Configure default profile application.yaml",
+          "description": "Create src/main/resources/application.yaml. Set spring.application.name to identity-service. Configure management.endpoint.health.probes.enabled: true, management.endpoints.web.exposure.include: health, management.health.liveness-state.enabled: true, and management.health.readiness-state.enabled: true. Mirrors the gateway-service default profile."
+        },
+        {
+          "summary": "Configure dev profile application-dev.yaml",
+          "description": "Create src/main/resources/application-dev.yaml. Set management.endpoint.health.show-details: always, management.endpoints.web.exposure.include: \"*\", and management.info.env.enabled: true. Mirrors the gateway-service dev profile."
+        },
+        {
+          "summary": "Create prod profile application-prod.yaml",
+          "description": "Create src/main/resources/application-prod.yaml as a minimal placeholder. No actuator overrides required at this stage. File must exist to establish the prod profile structure alongside default and dev."
+        },
+        {
+          "summary": "Create test smoke test class",
+          "description": "Create src/test/java/com/loanflow/identity/IdentityServiceApplicationTests.java annotated with @SpringBootTest. Add a contextLoads() method annotated with @Test. No actuator configuration should be active in the test context. Package follows com.loanflow.identity."
+        },
+        {
+          "summary": "Verify service starts on correct port",
+          "description": "Confirm the identity-service starts on port 8081 using ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev without errors. Verify GET /actuator/health returns 200 with expected liveness and readiness fields."
+        }
+      ]
+    },
+    {
       "summary": "Configure application properties across base, dev, and test profiles for identity-service",
       "description": "The identity-service is scaffolded with actuator and base profile files in place. This story adds the required Maven dependencies for persistence, migration, and validation, defines environment variables for the identity database, and populates application-dev.yaml and application-test.yaml so the service can start, connect to MySQL, run Flyway migrations, and run tests in isolation against H2 without requiring a running database instance.\n\nNote: infra/mysql/init/01_init.sql must be updated to provision the loanflow_identity_db database and grant the application user access. This depends on the Docker Compose MySQL infrastructure story.",
       "labels": [
