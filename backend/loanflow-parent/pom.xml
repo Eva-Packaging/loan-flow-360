@@ -34,6 +34,7 @@
         <lombok.version>1.18.44</lombok.version>
         <mapstruct.version>1.5.5.Final</mapstruct.version>
         <resilience4j.version>2.2.0</resilience4j.version>
+        <loanflow-common.version>0.0.1-SNAPSHOT</loanflow-common.version>
 	</properties>
     <dependencyManagement>
         <dependencies>
@@ -68,7 +69,18 @@
                 <artifactId>mapstruct</artifactId>
                 <version>${mapstruct.version}</version>
             </dependency>
+            <dependency>
+                <groupId>com.loanflow</groupId>
+                <artifactId>loanflow-common</artifactId>
+                <version>${loanflow-common.version}</version>
+            </dependency>
 
         </dependencies>
     </dependencyManagement>
+
+    <modules>
+        <module>../loanflow-common</module>
+        <module>../gateway-service</module>
+        <module>../loan-service</module>
+    </modules>
 </project>
