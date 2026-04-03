@@ -2,11 +2,16 @@ spring:
   application:
     name: loan-service
 
-    management:
-      endpoints:
-        web:
-          exposure:
-            include: health
-      endpoint:
-        health:
-          show-details: always
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    root: INFO
+    com.loanflow: DEBUG
