@@ -2,7 +2,7 @@
 <project version="4">
   <component name="CompilerConfiguration">
     <annotationProcessing>
-      <profile name="Annotation profile for identity-service" enabled="true">
+      <profile name="Annotation profile for underwriting-service" enabled="true">
         <sourceOutputDir name="target/generated-sources/annotations" />
         <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
         <outputRelativeToContentRoot value="true" />
@@ -10,17 +10,12 @@
           <entry name="$MAVEN_REPOSITORY$/org/projectlombok/lombok/1.18.44/lombok-1.18.44.jar" />
         </processorPath>
         <module name="identity-service" />
-      </profile>
-      <profile name="Annotation profile for underwriting-service" enabled="true">
-        <sourceOutputDir name="underwriting-service/target/generated-sources/annotations" />
-        <sourceTestOutputDir name="underwriting-service/target/generated-test-sources/test-annotations" />
-        <outputRelativeToContentRoot value="true" />
-        <processorPath useClasspath="false">
-          <entry name="$MAVEN_REPOSITORY$/org/projectlombok/lombok/1.18.44/lombok-1.18.44.jar" />
-        </processorPath>
         <module name="underwriting-service" />
       </profile>
     </annotationProcessing>
+    <bytecodeTargetLevel>
+      <module name="underwritingservice" target="17" />
+    </bytecodeTargetLevel>
   </component>
   <component name="JavacSettings">
     <option name="ADDITIONAL_OPTIONS_OVERRIDE">
