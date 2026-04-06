@@ -1,6 +1,6 @@
 spring:
   application:
-    name: loan-service
+    name: underwriting-service
 
 management:
   endpoints:
