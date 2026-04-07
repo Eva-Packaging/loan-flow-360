@@ -21,4 +21,8 @@ spring:
         - id: identity-route
           uri: http://localhost:8081
           predicates:
-            - Path=/apiGatewayTest
+            - Path=/identityService/**
+        - id: notification-route
+          uri: http://localhost:8083
+          predicates:
+            - Path=/notificationService/**
