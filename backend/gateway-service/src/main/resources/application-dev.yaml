@@ -19,10 +19,15 @@ spring:
     gateway:
       routes:
         - id: identity-route
-          uri: http://localhost:8081
+          uri: lb://identity-service
           predicates:
             - Path=/identityService/**
-        - id: notification-route
-          uri: http://localhost:8083
-          predicates:
-            - Path=/notificationService/**
+        # - id: notification-route
+        #   uri: http://localhost:8083
+        #   predicates:
+        #     - Path=/notificationService/**
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
