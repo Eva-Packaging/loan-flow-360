@@ -35,6 +35,7 @@
         <mapstruct.version>1.5.5.Final</mapstruct.version>
         <resilience4j.version>2.2.0</resilience4j.version>
         <loanflow-common.version>0.0.1-SNAPSHOT</loanflow-common.version>
+        <spring-cloud.version>2025.0.0</spring-cloud.version>
 	</properties>
     <dependencyManagement>
         <dependencies>
@@ -73,6 +74,11 @@
                 <groupId>com.loanflow</groupId>
                 <artifactId>loanflow-common</artifactId>
                 <version>${loanflow-common.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
             </dependency>
 
         </dependencies>

@@ -10,3 +10,15 @@ management:
   info:
     env:
       enabled: true
+
+server:
+  port: 8080
+
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: identity-route
+          uri: http://localhost:8081
+          predicates:
+            - Path=/apiGatewayTest
