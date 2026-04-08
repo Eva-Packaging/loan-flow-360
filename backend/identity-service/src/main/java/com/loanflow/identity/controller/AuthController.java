@@ -1,5 +1,6 @@
 package com.loanflow.identity.controller;
 
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -22,24 +23,23 @@ public class AuthController {
     private final AuthService authService;
     private final UserService userService;
 
-    // Spring automatically injects the services through this constructor
     public AuthController(AuthService authService, UserService userService) {
         this.authService = authService;
         this.userService = userService;
     }
 
     @PostMapping("/login")
-    public LoginResponseDto login(@Valid @RequestBody LoginRequestDto request) {
-        return authService.login(request);
+    public ResponseEntity<LoginResponseDto> login(@Valid @RequestBody LoginRequestDto request) {
+        return ResponseEntity.ok(authService.login(request));
     }
 
     @PostMapping("/refresh")
-    public LoginResponseDto refresh(@Valid @RequestBody RefreshTokenRequestDto request) {
-        return authService.refresh(request);
+    public ResponseEntity<LoginResponseDto> refresh(@Valid @RequestBody RefreshTokenRequestDto request) {
+        return ResponseEntity.ok(authService.refresh(request));
     }
 
     @GetMapping("/me")
-    public UserProfileDto getCurrentUser() {
-        return userService.getCurrentUserProfile();
+    public ResponseEntity<UserProfileDto> getCurrentUser() {
+        return ResponseEntity.ok(userService.getCurrentUserProfile());
     }
 }
