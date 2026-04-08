@@ -10,3 +10,24 @@ management:
   info:
     env:
       enabled: true
+
+server:
+  port: 8080
+
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: identity-route
+          uri: lb://identity-service
+          predicates:
+            - Path=/identityService/**
+        - id: notification-route
+          uri: lb://notification-service
+          predicates:
+            - Path=/notificationService/**
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/

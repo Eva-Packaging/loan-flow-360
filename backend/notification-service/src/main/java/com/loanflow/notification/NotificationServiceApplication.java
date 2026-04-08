@@ -1,4 +1,4 @@
-package com.loanflow.notification.service;
+package com.loanflow.notification;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -11,3 +11,4 @@ public class NotificationServiceApplication {
 	}
 
 }
+ 
