@@ -1,0 +1,7 @@
+package entites.enums;
+
+public enum DecisionStatus {
+    APPROVED,
+    REJECTED,
+    MANUAL_REVIEW
+}
