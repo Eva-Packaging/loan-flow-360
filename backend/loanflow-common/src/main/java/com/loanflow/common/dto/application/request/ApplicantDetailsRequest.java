@@ -1,4 +1,4 @@
-package com.loanflow.common.dto.request;
+package com.loanflow.common.dto.application.request;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;

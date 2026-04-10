@@ -1,4 +1,4 @@
-package com.loanflow.common.dto.request;
+package com.loanflow.common.dto.application.request;
 
 import com.loanflow.common.dto.enums.*;
 import jakarta.validation.Valid;
