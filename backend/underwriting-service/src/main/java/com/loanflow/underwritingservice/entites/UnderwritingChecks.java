@@ -1,9 +1,8 @@
-package entites;
+package com.loanflow.underwritingservice.entites;
 
-import entites.enums.CheckStatus;
-import entites.enums.CheckType;
+import com.loanflow.underwritingservice.entites.enums.CheckStatus;
+import com.loanflow.underwritingservice.entites.enums.CheckType;
 import jakarta.persistence.*;
-import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -24,7 +23,7 @@ public class UnderwritingChecks {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "underwriting_case_id")
-    private UnderwritingCases underwritingCase;
+    private UnderwritingCase underwritingCase;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -43,7 +42,6 @@ public class UnderwritingChecks {
     @CreationTimestamp
     @Column(nullable = false, updatable = false)
     private LocalDateTime excutedAt;
-
 
 
 

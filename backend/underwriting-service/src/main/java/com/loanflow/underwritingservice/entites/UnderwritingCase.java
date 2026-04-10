@@ -17,7 +17,8 @@ import java.util.List;
 @NoArgsConstructor
 @Builder
 @AllArgsConstructor
-public class UnderwritingCases {
+public class UnderwritingCase {
+
 
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -45,10 +46,10 @@ public class UnderwritingCases {
     private LocalDateTime completedAt;
 
     @OneToMany(mappedBy = "underwritingCase", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
-    private List<UnderwritingCases> checks;
+    private List<UnderwritingCase> checks;
 
-    @OneToMany(mappedBy = "underwritingCase", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
-    private List<UnderwritingChecks> decisions;
+    //@OneToMany(mappedBy = "underwritingCase", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+    //private List<UnderwritingDecisions> decisions;
 
     //@OneToMany(mappedBy = "underwritingCase", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
     //private List<ReviewNote> reviewNotes;
