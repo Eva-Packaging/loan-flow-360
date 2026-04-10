@@ -1,13 +1,10 @@
-package entites;
+package com.loanflow.underwritingservice.entites;
 
 
-import entites.enums.CaseStatus;
-import entites.enums.DecisionStatus;
+import com.loanflow.underwritingservice.entites.enums.CaseStatus;
+import com.loanflow.underwritingservice.entites.enums.DecisionStatus;
 import jakarta.persistence.*;
-import lombok.Builder;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
@@ -19,6 +16,7 @@ import java.util.List;
 @Setter
 @NoArgsConstructor
 @Builder
+@AllArgsConstructor
 public class UnderwritingCases {
 
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -52,8 +50,8 @@ public class UnderwritingCases {
     @OneToMany(mappedBy = "underwritingCase", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
     private List<UnderwritingChecks> decisions;
 
-    @OneToMany(mappedBy = "underwritingCase", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
-    private List<ReviewNote> reviewNotes;
+    //@OneToMany(mappedBy = "underwritingCase", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+    //private List<ReviewNote> reviewNotes;
 
 
 }
