@@ -112,3 +112,8 @@ Each service has `application.yaml` and `application-dev.yaml`. Run with the dev
 - `docs/database-schema.md` — Normalized schema definitions, indexes, Redis key patterns
 - `docs/roadmap.md` — 10-sprint implementation roadmap
 - `.claude/backlog-generator.md` — Spec for generating Jira backlog JSON from this codebase
+
+## Jira Backlog generation
+At the start of every new session:
+1. Read `.claude/backlog-generator.md` fully.
+2. Summarize the current repository status before making changes.

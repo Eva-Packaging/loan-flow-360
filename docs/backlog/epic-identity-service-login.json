@@ -1,0 +1,115 @@
+{
+  "summary": "Identity Service — Login Endpoint Controller and Service Scaffold",
+  "description": "Implement the POST /api/v1/auth/login endpoint in identity-service. This covers the request and response DTOs with @Valid enforcement, the AuthService interface, a stub AuthServiceImpl that returns a LoginResponseDto instance matching the API reference response shape, and a GlobalExceptionHandler that converts validation failures into a ProblemDetail response. No security configuration is required at this stage — the goal is a functional, testable REST endpoint.",
+  "labels": [
+    "identity-service",
+    "rest-api",
+    "dto",
+    "spring-mvc",
+    "validation",
+    "service-scaffold",
+    "sprint-2"
+  ],
+  "priority": "High",
+  "userType": "backend developer owning the Identity Service",
+  "functionality": "implement the login endpoint with validated request and response DTOs and a stubbed service layer that returns a response instance aligned with the API reference",
+  "benefit": "so the POST /api/v1/auth/login endpoint is fully addressable and returns the correct documented response shape before authentication business logic implementation begins",
+  "stories": [
+    {
+      "summary": "Create LoginRequestDto and LoginResponseDto for POST /api/v1/auth/login",
+      "description": "Implement the request and response DTOs for the login endpoint in identity-service under com.loanflow.identity.dto.auth. LoginRequestDto carries Bean Validation annotations so the controller can apply @Valid and delegate constraint checking to the framework. LoginResponseDto and its nested UserSummaryDto match the API reference response shape for POST /api/v1/auth/login exactly.",
+      "labels": [
+        "identity-service",
+        "dto",
+        "validation"
+      ],
+      "priority": "High",
+      "storyPoints": 2,
+      "acceptanceCriteria": [
+        {
+          "scenario": "LoginRequestDto fails validation when username is blank",
+          "given": "a LoginRequestDto is built with a blank username",
+          "when": "Bean Validation is applied via @Valid",
+          "then": "a constraint violation is raised identifying the username field"
+        },
+        {
+          "scenario": "LoginRequestDto fails validation when password is blank",
+          "given": "a LoginRequestDto is built with a blank password",
+          "when": "Bean Validation is applied",
+          "then": "a constraint violation is raised identifying the password field"
+        },
+        {
+          "scenario": "A fully valid LoginRequestDto passes all constraints",
+          "given": "a LoginRequestDto is built with a non-blank username and password",
+          "when": "Bean Validation is applied",
+          "then": "no constraint violations are raised"
+        },
+        {
+          "scenario": "LoginResponseDto serialises to the documented POST /api/v1/auth/login shape",
+          "given": "a LoginResponseDto is built with accessToken, tokenType 'Bearer', expiresIn 3600, and a UserSummaryDto with id, username, and role",
+          "when": "Jackson serialises the object",
+          "then": "the JSON contains accessToken, tokenType, expiresIn, and a nested user object with id, username, and role matching the API reference example"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create LoginRequestDto with @NotBlank validation",
+          "description": "Create com.loanflow.identity.dto.auth.LoginRequestDto in identity-service:\n\n@Getter\n@NoArgsConstructor\n@AllArgsConstructor\n@Builder\npublic class LoginRequestDto {\n\n    @NotBlank(message = \"Username is required\")\n    private String username;\n\n    @NotBlank(message = \"Password is required\")\n    private String password;\n}\n\nspring-boot-starter-validation is already pulled in transitively by spring-boot-starter-web — no additional dependency needed."
+        },
+        {
+          "summary": "Create UserSummaryDto and LoginResponseDto",
+          "description": "Create com.loanflow.identity.dto.auth.UserSummaryDto:\n\n@Getter\n@Builder\n@NoArgsConstructor\n@AllArgsConstructor\npublic class UserSummaryDto {\n    private Long id;\n    private String username;\n    private String role;\n}\n\nCreate com.loanflow.identity.dto.auth.LoginResponseDto:\n\n@Getter\n@Builder\n@NoArgsConstructor\n@AllArgsConstructor\npublic class LoginResponseDto {\n    private String accessToken;\n    private String tokenType;\n    private long expiresIn;\n    private UserSummaryDto user;\n}"
+        }
+      ]
+    },
+    {
+      "summary": "Implement POST /api/v1/auth/login endpoint with service scaffold",
+      "description": "Implement the POST /api/v1/auth/login endpoint in identity-service. This story creates AuthController with the login method, the AuthService interface, a stub AuthServiceImpl returning a LoginResponseDto with placeholder values matching the API reference, and a GlobalExceptionHandler that maps validation failures to a ProblemDetail response body. No security configuration is introduced at this stage.",
+      "labels": [
+        "identity-service",
+        "rest-api",
+        "spring-mvc",
+        "exception-handling",
+        "service-scaffold"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "POST /api/v1/auth/login returns 200 with a stub LoginResponseDto",
+          "given": "a valid LoginRequestDto is submitted with non-blank username and password",
+          "when": "the stub service executes",
+          "then": "a 200 OK response is returned with a body containing accessToken, tokenType 'Bearer', expiresIn 3600, and a nested user object with id, username, and role"
+        },
+        {
+          "scenario": "POST /api/v1/auth/login returns 400 with ProblemDetail body on validation failure",
+          "given": "a LoginRequestDto with a blank username is submitted",
+          "when": "the controller applies @Valid",
+          "then": "a 400 response is returned with a ProblemDetail body containing status 400, a title, and a detail identifying the missing field"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create AuthService interface with login method",
+          "description": "Create com.loanflow.identity.service.AuthService as a Java interface:\n\npublic interface AuthService {\n    LoginResponseDto login(LoginRequestDto request);\n}"
+        },
+        {
+          "summary": "Create AuthServiceImpl stub returning a placeholder LoginResponseDto",
+          "description": "Create com.loanflow.identity.service.impl.AuthServiceImpl annotated with @Service:\n\n@Service\n@RequiredArgsConstructor\npublic class AuthServiceImpl implements AuthService {\n\n    @Override\n    public LoginResponseDto login(LoginRequestDto request) {\n        return LoginResponseDto.builder()\n            .accessToken(\"stub-access-token\")\n            .tokenType(\"Bearer\")\n            .expiresIn(3600)\n            .user(UserSummaryDto.builder()\n                .id(102L)\n                .username(request.getUsername())\n                .role(\"LOAN_OFFICER\")\n                .build())\n            .build();\n    }\n}\n\nThe stub echoes the submitted username in the user summary so the response is traceable to the input."
+        },
+        {
+          "summary": "Create AuthController with POST /api/v1/auth/login",
+          "description": "Create com.loanflow.identity.controller.AuthController:\n\n@RestController\n@RequestMapping(\"/api/v1/auth\")\n@RequiredArgsConstructor\npublic class AuthController {\n\n    private final AuthService authService;\n\n    @PostMapping(\"/login\")\n    public ResponseEntity<LoginResponseDto> login(\n            @RequestBody @Valid LoginRequestDto request) {\n        return ResponseEntity.ok(authService.login(request));\n    }\n}"
+        },
+        {
+          "summary": "Create GlobalExceptionHandler using ProblemDetail",
+          "description": "Create com.loanflow.identity.exception.GlobalExceptionHandler annotated with @RestControllerAdvice. Use Spring's built-in ProblemDetail (org.springframework.http.ProblemDetail) as the response body — no custom error class needed.\n\nHandle the following exception types:\n\n1. MethodArgumentNotValidException → 400 Bad Request\n   Collect all field violation messages into a comma-separated string and set as the detail:\n\n   @ExceptionHandler(MethodArgumentNotValidException.class)\n   public ProblemDetail handleValidation(MethodArgumentNotValidException ex, HttpServletRequest request) {\n       String detail = ex.getBindingResult().getFieldErrors().stream()\n           .map(fe -> fe.getField() + \": \" + fe.getDefaultMessage())\n           .collect(Collectors.joining(\", \"));\n       ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, detail);\n       pd.setTitle(\"Validation Failed\");\n       pd.setInstance(URI.create(request.getRequestURI()));\n       return pd;\n   }\n\n2. Exception (catch-all) → 500 Internal Server Error with detail 'An unexpected error occurred'"
+        },
+        {
+          "summary": "Smoke test the endpoint via dev profile",
+          "description": "Start identity-service with the dev profile and confirm:\n\n1. Spring context loads without errors.\n2. GET /actuator/health returns 200.\n3. POST /api/v1/auth/login with a blank username returns 400 with a ProblemDetail body containing status 400, a title, and a detail identifying the missing field.\n4. POST /api/v1/auth/login with a valid body returns 200 with a LoginResponseDto containing accessToken 'stub-access-token', tokenType 'Bearer', expiresIn 3600, and a user object with the submitted username."
+        }
+      ]
+    }
+  ]
+}

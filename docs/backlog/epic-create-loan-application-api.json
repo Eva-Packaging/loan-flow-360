@@ -1,0 +1,210 @@
+{
+  "summary": "Loan Application Service — Create Loan Application Endpoint",
+  "description": "Implement the POST /api/v1/applications endpoint in loan-service. This covers all work needed to accept, validate, and respond to a loan application submission request: shared enums and request/response DTOs in loanflow-common, the controller method with RBAC and @Valid enforcement, the service interface, and a stub service implementation that returns a new CreateLoanApplicationResponse instance matching the API reference shape.\n\nloanflow-common already exists and is parented by loanflow-parent, which inherits spring-boot-starter-parent. Validation and Lombok are version-managed by the parent chain. loanflow-common must declare only what a DTO library strictly needs — spring-boot-starter-validation and lombok — and must not pull in web, actuator, or resilience4j.",
+  "labels": [
+    "loan-service",
+    "loanflow-common",
+    "rest-api",
+    "dto",
+    "spring-mvc",
+    "validation",
+    "rbac",
+    "sprint-2",
+    "module-3"
+  ],
+  "priority": "High",
+  "userType": "backend developer owning the Loan Application Service",
+  "functionality": "implement the create loan application endpoint with validated request DTOs, a matching response DTO, and a stubbed service layer that returns a response instance aligned with the API reference",
+  "benefit": "so the POST /api/v1/applications endpoint is fully addressable, role-protected, and returns the correct documented response shape before business logic implementation begins",
+  "stories": [
+    {
+      "summary": "Configure loanflow-common with minimal DTO dependencies and shared domain enums",
+      "description": "Trim the existing loanflow-common pom.xml to only what a DTO library requires, then add the domain enums used by the create application request and response contracts.\n\nThe current pom pulls in spring-boot-starter-web, spring-boot-starter-actuator, and resilience4j, none of which belong in a shared DTO module. Every service that depends on loanflow-common unnecessarily inherits those transitive deps. Because loanflow-common is already parented by loanflow-parent (which inherits spring-boot-starter-parent), all versions are managed — no version attributes are needed in the trimmed pom.",
+      "labels": [
+        "loanflow-common",
+        "maven",
+        "enums",
+        "dto"
+      ],
+      "priority": "High",
+      "storyPoints": 2,
+      "acceptanceCriteria": [
+        {
+          "scenario": "loanflow-common builds as a plain JAR with trimmed dependencies",
+          "given": "the pom contains only spring-boot-starter-validation and lombok",
+          "when": "mvnw clean package is run from backend/loanflow-common",
+          "then": "the module compiles and produces a plain JAR without errors and no spring-boot repackage goal runs"
+        },
+        {
+          "scenario": "loan-service does not receive web or actuator from loanflow-common transitively",
+          "given": "the trimmed loanflow-common is a dependency of loan-service",
+          "when": "mvn dependency:tree is run on loan-service",
+          "then": "spring-boot-starter-web and spring-boot-starter-actuator are not listed as transitive dependencies originating from loanflow-common"
+        },
+        {
+          "scenario": "Domain enums are importable from loan-service without JPA annotations",
+          "given": "LoanType, LoanStatus, and EmploymentStatus exist under com.loanflow.common.enums",
+          "when": "a class in loan-service imports these enums",
+          "then": "the imports resolve without error and no jakarta.persistence annotations are present on the enum types"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Trim loanflow-common pom.xml to DTO-only dependencies",
+          "description": "Edit backend/loanflow-common/pom.xml. Remove the following dependencies:\n\n- spring-boot-starter\n- spring-boot-starter-web\n- spring-boot-starter-actuator\n- resilience4j-core\n- resilience4j-retry\n- resilience4j-circuitbreaker\n- jackson-databind (available transitively from spring-boot-starter-validation; no need to redeclare)\n\nRetain or add only the following. No version attributes — all versions are managed by loanflow-parent:\n\n- spring-boot-starter-validation (provides jakarta.validation annotations: @NotNull, @NotBlank, @Valid, etc.)\n- lombok (optional, annotation processor only)\n\nVerify the module still compiles cleanly with mvnw clean package after the change."
+        },
+        {
+          "summary": "Create shared domain enums under com.loanflow.common.enums",
+          "description": "Create the following three enums in loanflow-common under src/main/java/com/loanflow/common/enums. These are the API contract versions used in DTOs. The loan-service entity layer has its own JPA-annotated enums under com.loanflow.loanservice.entity.enums — keep them separate; the mapper converts between them.\n\nLoanType.java:\npublic enum LoanType { PERSONAL, AUTO, MORTGAGE, BUSINESS }\n\nLoanStatus.java:\npublic enum LoanStatus { SUBMITTED, PENDING_DOCUMENTS, UNDERWRITING_IN_PROGRESS, PENDING_REVIEW, APPROVED, REJECTED }\n\nEmploymentStatus.java:\npublic enum EmploymentStatus { FULL_TIME, PART_TIME, SELF_EMPLOYED, UNEMPLOYED, RETIRED }\n\nNo @Enumerated, @Column, or any jakarta.persistence annotations."
+        }
+      ]
+    },
+    {
+      "summary": "Create request DTOs for POST /api/v1/applications in loanflow-common",
+      "description": "Implement CreateLoanApplicationRequest and its nested ApplicantDetailsRequest in loanflow-common under com.loanflow.common.dto.application.request. Both classes carry Bean Validation annotations so the controller can apply @Valid and delegate all constraint checking to the framework. Field names, types, and constraints are derived from the API reference for POST /api/v1/applications.",
+      "labels": [
+        "loanflow-common",
+        "dto",
+        "request",
+        "validation",
+        "loan-application"
+      ],
+      "priority": "High",
+      "storyPoints": 2,
+      "acceptanceCriteria": [
+        {
+          "scenario": "CreateLoanApplicationRequest fails validation when loanType is null",
+          "given": "a CreateLoanApplicationRequest is built with a null loanType",
+          "when": "Bean Validation is applied via @Valid",
+          "then": "a constraint violation is raised identifying the loanType field"
+        },
+        {
+          "scenario": "ApplicantDetailsRequest rejects a malformed email",
+          "given": "an ApplicantDetailsRequest is built with email set to 'not-an-email'",
+          "when": "Bean Validation is applied",
+          "then": "a constraint violation is raised on the email field"
+        },
+        {
+          "scenario": "CreateLoanApplicationRequest fails validation when amount is below minimum",
+          "given": "a CreateLoanApplicationRequest is built with amount set to 500.00",
+          "when": "Bean Validation is applied",
+          "then": "a constraint violation is raised on the amount field referencing the minimum value"
+        },
+        {
+          "scenario": "A fully valid CreateLoanApplicationRequest passes all constraints",
+          "given": "a CreateLoanApplicationRequest is built with valid loanType, amount, termMonths, annualIncome, employmentStatus, and a valid applicantDetails block",
+          "when": "Bean Validation is applied",
+          "then": "no constraint violations are raised"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create ApplicantDetailsRequest nested DTO",
+          "description": "Create com.loanflow.common.dto.application.request.ApplicantDetailsRequest in loanflow-common:\n\n@Getter\n@NoArgsConstructor\n@AllArgsConstructor\n@Builder\npublic class ApplicantDetailsRequest {\n\n    @NotBlank(message = \"First name is required\")\n    @Size(max = 100)\n    private String firstName;\n\n    @NotBlank(message = \"Last name is required\")\n    @Size(max = 100)\n    private String lastName;\n\n    @NotBlank(message = \"Email is required\")\n    @Email(message = \"Email must be a valid address\")\n    @Size(max = 255)\n    private String email;\n\n    @NotBlank(message = \"Phone is required\")\n    @Size(max = 30)\n    private String phone;\n}"
+        },
+        {
+          "summary": "Create CreateLoanApplicationRequest DTO",
+          "description": "Create com.loanflow.common.dto.application.request.CreateLoanApplicationRequest in loanflow-common:\n\n@Getter\n@NoArgsConstructor\n@AllArgsConstructor\n@Builder\npublic class CreateLoanApplicationRequest {\n\n    @NotNull(message = \"Loan type is required\")\n    private LoanType loanType;\n\n    @NotNull(message = \"Requested amount is required\")\n    @DecimalMin(value = \"1000.00\", message = \"Amount must be at least 1000.00\")\n    @DecimalMax(value = \"10000000.00\", message = \"Amount exceeds maximum allowed\")\n    @Digits(integer = 13, fraction = 2)\n    private BigDecimal amount;\n\n    @NotNull(message = \"Term is required\")\n    @Min(value = 6, message = \"Term must be at least 6 months\")\n    @Max(value = 360, message = \"Term cannot exceed 360 months\")\n    private Integer termMonths;\n\n    @NotNull(message = \"Annual income is required\")\n    @DecimalMin(value = \"0.01\", message = \"Annual income must be greater than zero\")\n    @Digits(integer = 13, fraction = 2)\n    private BigDecimal annualIncome;\n\n    @NotNull(message = \"Employment status is required\")\n    private EmploymentStatus employmentStatus;\n\n    @NotNull(message = \"Applicant details are required\")\n    @Valid\n    private ApplicantDetailsRequest applicantDetails;\n}\n\nImport LoanType and EmploymentStatus from com.loanflow.common.enums."
+        }
+      ]
+    },
+    {
+      "summary": "Create CreateLoanApplicationResponse DTO in loanflow-common",
+      "description": "Implement CreateLoanApplicationResponse in loanflow-common under com.loanflow.common.dto.application.response. Field names and types match the API reference response shape for POST /api/v1/applications exactly so Jackson produces the documented contract without additional configuration.",
+      "labels": [
+        "loanflow-common",
+        "dto",
+        "response",
+        "loan-application"
+      ],
+      "priority": "High",
+      "storyPoints": 1,
+      "acceptanceCriteria": [
+        {
+          "scenario": "CreateLoanApplicationResponse serialises to the documented POST /api/v1/applications shape",
+          "given": "a CreateLoanApplicationResponse is built with applicationId 50021, status SUBMITTED, submittedAt, loanType PERSONAL, amount 25000, and nextStep UPLOAD_REQUIRED_DOCUMENTS",
+          "when": "Jackson serialises the object",
+          "then": "the JSON contains applicationId, status, submittedAt, loanType, amount, and nextStep at the top level matching the API reference example"
+        },
+        {
+          "scenario": "LoanStatus and LoanType fields serialise as string enum values",
+          "given": "a CreateLoanApplicationResponse is built with status LoanStatus.SUBMITTED and loanType LoanType.PERSONAL",
+          "when": "Jackson serialises the object",
+          "then": "status serialises as the string 'SUBMITTED' and loanType as 'PERSONAL'"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create CreateLoanApplicationResponse DTO",
+          "description": "Create com.loanflow.common.dto.application.response.CreateLoanApplicationResponse in loanflow-common:\n\n@Getter\n@Builder\n@NoArgsConstructor\n@AllArgsConstructor\npublic class CreateLoanApplicationResponse {\n    private Long applicationId;\n    private LoanStatus status;\n    private Instant submittedAt;\n    private LoanType loanType;\n    private BigDecimal amount;\n    private String nextStep;\n}\n\nImport LoanStatus and LoanType from com.loanflow.common.enums."
+        }
+      ]
+    },
+    {
+      "summary": "Implement POST /api/v1/applications endpoint with service scaffold",
+      "description": "Implement the POST /api/v1/applications endpoint in loan-service. This story creates LoanApplicationController with the single create method, the LoanApplicationService interface with the createApplication method signature, a stub LoanApplicationServiceImpl that returns a new CreateLoanApplicationResponse instance with placeholder values matching the API reference, a GlobalExceptionHandler that converts validation failures into the standard error payload, and a SecurityConfig that activates JWT resource server validation and @PreAuthorize method security.\n\nThe stub service returns a real response instance — not UnsupportedOperationException — so the endpoint is fully exercisable and the response shape can be verified before business logic is added.",
+      "labels": [
+        "loan-service",
+        "rest-api",
+        "spring-mvc",
+        "rbac",
+        "exception-handling",
+        "service-scaffold"
+      ],
+      "priority": "High",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "POST /api/v1/applications is restricted to APPLICANT role",
+          "given": "a request is sent to POST /api/v1/applications with a JWT carrying role LOAN_OFFICER",
+          "when": "the request reaches the security filter chain",
+          "then": "a 403 Forbidden response is returned and the controller method body is not executed"
+        },
+        {
+          "scenario": "POST /api/v1/applications returns 400 with standard error payload on validation failure",
+          "given": "a CreateLoanApplicationRequest with a null loanType is submitted with a valid APPLICANT JWT",
+          "when": "the controller applies @Valid",
+          "then": "GlobalExceptionHandler returns a 400 response containing timestamp, status, error, message, and path fields"
+        },
+        {
+          "scenario": "POST /api/v1/applications returns 201 with a stub CreateLoanApplicationResponse",
+          "given": "a valid CreateLoanApplicationRequest is submitted with a valid APPLICANT JWT",
+          "when": "the stub service executes",
+          "then": "a 201 Created response is returned with a body containing applicationId, status SUBMITTED, submittedAt, loanType, amount, and nextStep UPLOAD_REQUIRED_DOCUMENTS"
+        },
+        {
+          "scenario": "POST /api/v1/applications without a JWT returns 401",
+          "given": "a request is sent to POST /api/v1/applications with no Authorization header",
+          "when": "the request reaches the security filter chain",
+          "then": "a 401 Unauthorized response is returned"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create LoanApplicationService interface with createApplication method",
+          "description": "Create com.loanflow.loanservice.service.LoanApplicationService as a Java interface in loan-service:\n\npublic interface LoanApplicationService {\n    CreateLoanApplicationResponse createApplication(CreateLoanApplicationRequest request, Long applicantUserId);\n}\n\nImport CreateLoanApplicationRequest and CreateLoanApplicationResponse from com.loanflow.common.dto.application."
+        },
+        {
+          "summary": "Create LoanApplicationServiceImpl stub returning a placeholder response",
+          "description": "Create com.loanflow.loanservice.service.impl.LoanApplicationServiceImpl annotated with @Service:\n\n@Service\n@RequiredArgsConstructor\npublic class LoanApplicationServiceImpl implements LoanApplicationService {\n\n    @Override\n    public CreateLoanApplicationResponse createApplication(\n            CreateLoanApplicationRequest request, Long applicantUserId) {\n        return CreateLoanApplicationResponse.builder()\n            .applicationId(50021L)\n            .status(LoanStatus.SUBMITTED)\n            .submittedAt(Instant.now())\n            .loanType(request.getLoanType())\n            .amount(request.getAmount())\n            .nextStep(\"UPLOAD_REQUIRED_DOCUMENTS\")\n            .build();\n    }\n}\n\nThe stub echoes loanType and amount from the incoming request so the response is traceable to the input. Import LoanStatus and LoanType from com.loanflow.common.enums."
+        },
+        {
+          "summary": "Create GlobalExceptionHandler with standard error payload",
+          "description": "Create com.loanflow.loanservice.exception.GlobalExceptionHandler annotated with @RestControllerAdvice.\n\nFirst define the error payload:\n\npublic record ApiErrorResponse(\n    Instant timestamp,\n    int status,\n    String error,\n    String message,\n    String path\n) {}\n\nHandle the following exception types:\n\n1. MethodArgumentNotValidException → 400 Bad Request\n   Collect all field violation messages into a comma-separated string for the message field.\n\n2. AccessDeniedException (org.springframework.security) → 403 Forbidden\n\n3. Exception (catch-all) → 500 Internal Server Error with message 'An unexpected error occurred'\n\nAll handlers build an ApiErrorResponse. Source the path field from HttpServletRequest.getRequestURI()."
+        },
+        {
+          "summary": "Create LoanApplicationController with POST /api/v1/applications",
+          "description": "Create com.loanflow.loanservice.controller.LoanApplicationController in loan-service:\n\n@RestController\n@RequestMapping(\"/api/v1/applications\")\n@RequiredArgsConstructor\npublic class LoanApplicationController {\n\n    private final LoanApplicationService loanApplicationService;\n\n    @PostMapping\n    @PreAuthorize(\"hasRole('APPLICANT')\")\n    public ResponseEntity<CreateLoanApplicationResponse> createApplication(\n            @RequestBody @Valid CreateLoanApplicationRequest request,\n            @AuthenticationPrincipal Jwt jwt) {\n        Long applicantUserId = jwt.getClaim(\"userId\");\n        return ResponseEntity.status(HttpStatus.CREATED)\n                .body(loanApplicationService.createApplication(request, applicantUserId));\n    }\n}"
+        },
+        {
+          "summary": "Create SecurityConfig with JWT resource server and @EnableMethodSecurity",
+          "description": "Create com.loanflow.loanservice.config.SecurityConfig in loan-service:\n\n@Configuration\n@EnableMethodSecurity\npublic class SecurityConfig {\n\n    @Bean\n    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {\n        return http\n            .csrf(csrf -> csrf.disable())\n            .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))\n            .authorizeHttpRequests(auth -> auth\n                .requestMatchers(\"/actuator/health\").permitAll()\n                .anyRequest().authenticated())\n            .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()))\n            .build();\n    }\n}\n\nEnsure the following are present in backend/loan-service/pom.xml (versions managed by loanflow-parent):\n- spring-boot-starter-security\n- spring-boot-starter-oauth2-resource-server\n\nIn application-dev.yaml set a local HMAC secret so JWT validation works without a running identity-service:\n\nspring:\n  security:\n    oauth2:\n      resourceserver:\n        jwt:\n          secret: dev-local-secret-key-min-32-chars"
+        },
+        {
+          "summary": "Smoke test the endpoint via dev profile",
+          "description": "Start loan-service with the dev profile and confirm:\n\n1. Spring context loads without errors.\n2. GET /actuator/health returns 200.\n3. POST /api/v1/applications with no JWT returns 401.\n4. POST /api/v1/applications with a LOAN_OFFICER JWT returns 403.\n5. POST /api/v1/applications with an APPLICANT JWT and a null loanType returns 400 with the ApiErrorResponse payload.\n6. POST /api/v1/applications with an APPLICANT JWT and a valid body returns 201 with a CreateLoanApplicationResponse containing status SUBMITTED and nextStep UPLOAD_REQUIRED_DOCUMENTS."
+        }
+      ]
+    }
+  ]
+}

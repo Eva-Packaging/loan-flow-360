@@ -1,0 +1,263 @@
+{
+  "summary": "Jenkins CI/CD Pipeline with AWS ECS Deployment",
+  "description": "Implement a Jenkins-based CI/CD pipeline that builds, tests, containerizes, and deploys all LoanFlow 360 microservices to AWS ECS Fargate via ECR. A single root Jenkinsfile orchestrates per-service stages with branch-based environment targeting, secrets managed through AWS Secrets Manager, and ALB-fronted ECS services behind the API Gateway.",
+  "labels": ["ci-cd", "jenkins", "aws", "ecs", "devops", "deployment"],
+  "priority": "High",
+  "userType": "operations engineer",
+  "functionality": "automate build, test, and deployment of all microservices to AWS ECS through a unified Jenkins pipeline triggered by GitHub pushes",
+  "benefit": "eliminate manual deployments, enforce quality gates on every push, and maintain consistent environment parity between development and production",
+  "stories": [
+    {
+      "summary": "Provision AWS core infrastructure for ECS deployment",
+      "description": "Set up the foundational AWS resources required to run LoanFlow 360 on ECS: VPC with public/private subnets, ECR repositories for each microservice, RDS MySQL instance, ElastiCache Redis cluster, MSK Kafka cluster, S3 bucket for documents, DocumentDB cluster for the notification service, and IAM roles for Jenkins and ECS task execution.",
+      "labels": ["aws", "infrastructure", "ecs", "ecr"],
+      "priority": "High",
+      "storyPoints": 13,
+      "acceptanceCriteria": [
+        {
+          "scenario": "ECR repositories exist for all services",
+          "given": "the AWS account is configured",
+          "when": "infrastructure provisioning is complete",
+          "then": "one ECR repository exists for each of the 6 microservices with image scanning enabled"
+        },
+        {
+          "scenario": "Managed backing services are reachable from ECS tasks",
+          "given": "ECS task definitions reference the correct security groups",
+          "when": "a service task starts",
+          "then": "it can connect to RDS, ElastiCache, MSK, and DocumentDB via private VPC endpoints"
+        },
+        {
+          "scenario": "IAM roles enforce least privilege",
+          "given": "the Jenkins EC2 IAM role is defined",
+          "when": "Jenkins pushes an image and triggers an ECS deployment",
+          "then": "the role allows ECR push and ECS update-service but denies unrelated resource access"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create VPC with public and private subnets across two AZs",
+          "description": "Define VPC, internet gateway, NAT gateway, route tables, and security groups for ECS tasks, ALB, RDS, ElastiCache, MSK, and DocumentDB."
+        },
+        {
+          "summary": "Provision ECR repositories for all six microservices",
+          "description": "Create one ECR repo per service: api-gateway, identity-service, loan-service, document-service, underwriting-service, notification-service. Enable image tag immutability and vulnerability scanning."
+        },
+        {
+          "summary": "Provision RDS MySQL, ElastiCache Redis, MSK, S3, and DocumentDB",
+          "description": "Provision each managed backing service with the correct instance type, subnet group, and security group. Store connection strings in AWS Secrets Manager."
+        },
+        {
+          "summary": "Create Jenkins EC2 IAM role with ECR and ECS deploy permissions",
+          "description": "Define an IAM role attachable to the Jenkins EC2 instance granting: ecr:GetAuthorizationToken, ecr:BatchCheckLayerAvailability, ecr:PutImage, ecs:UpdateService, ecs:DescribeServices, and secretsmanager:GetSecretValue for deployment secrets."
+        }
+      ]
+    },
+    {
+      "summary": "Configure Jenkins master on EC2 with required plugins and credentials",
+      "description": "Install and configure a Jenkins master on an EC2 instance (t3.medium) within the VPC. Install necessary plugins for Docker, AWS, GitHub webhooks, and pipeline support. Bind the EC2 IAM role for AWS access and configure GitHub webhook integration to trigger builds on push.",
+      "labels": ["jenkins", "ec2", "ci-cd", "configuration"],
+      "priority": "High",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "GitHub webhook triggers Jenkins pipeline",
+          "given": "a developer pushes to a branch in the LoanFlow 360 repository",
+          "when": "the GitHub webhook fires",
+          "then": "Jenkins detects the push and starts the corresponding pipeline within 30 seconds"
+        },
+        {
+          "scenario": "Jenkins authenticates to ECR without stored credentials",
+          "given": "the Jenkins EC2 instance has the IAM role attached",
+          "when": "the pipeline runs the ECR login step",
+          "then": "Docker authenticates to ECR using the instance metadata service without hardcoded AWS keys"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Install Jenkins LTS on EC2 and configure system settings",
+          "description": "Provision t3.medium EC2 in the public subnet, install Jenkins LTS, configure JVM heap settings, and expose Jenkins via nginx reverse proxy."
+        },
+        {
+          "summary": "Install Jenkins plugins: Pipeline, Docker Pipeline, AWS Steps, GitHub Integration",
+          "description": "Install and configure the Pipeline, Docker Pipeline, Amazon ECR, AWS Credentials, and GitHub Branch Source plugins."
+        },
+        {
+          "summary": "Configure GitHub webhook and multibranch pipeline job",
+          "description": "Add webhook in GitHub repo settings pointing to the Jenkins server. Create a multibranch pipeline job that discovers the root Jenkinsfile and maps branches to environments."
+        }
+      ]
+    },
+    {
+      "summary": "Implement root Jenkinsfile for multi-service CI/CD pipeline",
+      "description": "Write a single Jenkinsfile at the repository root that detects which services have changed, runs Maven build and unit tests per affected service, builds Docker images, pushes to ECR, and triggers ECS rolling deployments. Branch logic maps development/* to the dev ECS cluster and main to production.",
+      "labels": ["jenkins", "ci-cd", "pipeline", "docker", "ecs"],
+      "priority": "High",
+      "storyPoints": 8,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Only changed services are rebuilt and redeployed",
+          "given": "a commit modifies only the loan-service source files",
+          "when": "the pipeline runs",
+          "then": "only the loan-service build, Docker, and ECS deploy stages execute; other services are skipped"
+        },
+        {
+          "scenario": "Pipeline fails fast on test failure without pushing an image",
+          "given": "a unit test in the identity-service fails",
+          "when": "the Maven test stage runs",
+          "then": "the pipeline marks the build as failed, skips Docker build and ECR push, and posts the failure to the GitHub commit status"
+        },
+        {
+          "scenario": "main branch deploys to production ECS cluster",
+          "given": "a merge to main passes all stages",
+          "when": "the ECS deploy stage runs",
+          "then": "the pipeline calls ecs update-service on the production ECS cluster with the new ECR image tag"
+        },
+        {
+          "scenario": "development/* branch deploys to dev ECS cluster",
+          "given": "a push to a development/* branch passes all stages",
+          "when": "the ECS deploy stage runs",
+          "then": "the pipeline deploys to the dev ECS cluster, not production"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Write declarative Jenkinsfile with parallel build stages for all six services",
+          "description": "Define pipeline with stages: Checkout, Detect Changes, Build & Test (parallel per service), Docker Build, ECR Push, ECS Deploy. Use environment blocks for branch-to-cluster mapping."
+        },
+        {
+          "summary": "Add change detection logic using git diff to scope builds per service",
+          "description": "Use git diff HEAD~1 against per-service directory paths to set per-service build flags. If a shared config or root pom.xml changes, rebuild all services."
+        },
+        {
+          "summary": "Configure Docker build steps to tag images with Git commit SHA",
+          "description": "Tag each image with both the short commit SHA and an environment tag (dev or latest) to support traceability and rollback identification."
+        },
+        {
+          "summary": "Implement ECS rolling deploy step with stability wait",
+          "description": "After ECR push, call aws ecs update-service --force-new-deployment for the target cluster and service. Use aws ecs wait services-stable to confirm successful deployment before marking the stage green."
+        }
+      ]
+    },
+    {
+      "summary": "Define ECS task definitions and Fargate services for all microservices",
+      "description": "Create ECS Fargate task definitions for each of the six microservices with correct CPU and memory allocation, environment variable injection from Secrets Manager and Parameter Store, and health check configuration. Register each as an ECS service attached to an ALB target group.",
+      "labels": ["ecs", "fargate", "aws", "deployment", "task-definitions"],
+      "priority": "High",
+      "storyPoints": 8,
+      "acceptanceCriteria": [
+        {
+          "scenario": "ECS service reaches steady state after rolling deployment",
+          "given": "a new task definition revision is deployed via Jenkins",
+          "when": "ECS performs the rolling update",
+          "then": "the service reaches steady state with the desired task count on the new revision within 3 minutes"
+        },
+        {
+          "scenario": "Secrets are injected at task startup without hardcoding",
+          "given": "a task definition references Secrets Manager ARNs",
+          "when": "the ECS task starts",
+          "then": "the Spring Boot service reads DB credentials and JWT secret from environment variables populated by ECS secrets injection"
+        },
+        {
+          "scenario": "ALB health check routes traffic only to healthy tasks",
+          "given": "a task fails its /actuator/health check",
+          "when": "the ALB evaluates target group health",
+          "then": "the unhealthy task is deregistered from the target group and receives no traffic"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Write ECS Fargate task definitions for all six services",
+          "description": "Define task definitions for api-gateway, identity-service, loan-service, document-service, underwriting-service, and notification-service. Set CPU and memory per service tier. Reference ECR image URIs using the environment-specific tag."
+        },
+        {
+          "summary": "Configure Secrets Manager and Parameter Store references in task definitions",
+          "description": "Add secrets blocks referencing Secrets Manager ARNs for DB passwords, Redis auth token, JWT secret, and MSK credentials. Add environment variables from Parameter Store for non-sensitive Spring Boot config."
+        },
+        {
+          "summary": "Register ECS services with ALB target groups and rolling deployment config",
+          "description": "Create ECS services with minimum healthy percent 50 and maximum percent 200. Register each service with its ALB target group. Set health check path to /actuator/health and healthy threshold to 2."
+        },
+        {
+          "summary": "Configure ALB listener rules to route all traffic through the API Gateway service",
+          "description": "Define ALB listener rules routing /api/v1/* to the api-gateway ECS service target group on port 8080. Add a default 404 rule for unmatched paths."
+        }
+      ]
+    },
+    {
+      "summary": "Configure AWS Secrets Manager for environment-specific service credentials",
+      "description": "Store all sensitive service credentials including database passwords, JWT secret, Redis auth token, MSK credentials, and S3 access keys in AWS Secrets Manager under environment-namespaced paths. Update Spring Boot application.yaml files to consume values via environment variable injection at ECS task startup.",
+      "labels": ["secrets-management", "aws", "security", "configuration"],
+      "priority": "Medium",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "No credentials exist in source control or Docker images",
+          "given": "the repository and built Docker images are inspected",
+          "when": "a security review is performed",
+          "then": "no plaintext passwords, JWT secrets, or connection strings are found in committed files or image layers"
+        },
+        {
+          "scenario": "Service reads correct credentials for its environment",
+          "given": "a loan-service ECS task starts in the dev environment",
+          "when": "Spring Boot initializes the data source",
+          "then": "the service connects to the dev RDS instance using credentials resolved from /loanflow/dev/loan-service/db-password in Secrets Manager"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create Secrets Manager secret structure under /loanflow/{env}/{service}/ namespace",
+          "description": "Define secrets for dev and prod environments covering DB credentials, JWT secret, Redis auth token, MSK SASL credentials, and S3 access keys per service."
+        },
+        {
+          "summary": "Update application.yaml files to reference credentials via environment variables",
+          "description": "Replace hardcoded values in application-dev.yaml and application.yaml with ${ENV_VAR} references that ECS secrets injection will populate at task startup."
+        },
+        {
+          "summary": "Scope ECS task execution role policy to Secrets Manager read on /loanflow/* paths",
+          "description": "Update the ECS task execution IAM role with a resource-scoped policy granting secretsmanager:GetSecretValue limited to ARNs matching arn:aws:secretsmanager:*:*:secret:/loanflow/*."
+        }
+      ]
+    },
+    {
+      "summary": "Implement CloudWatch logging and automated rollback on deployment failure",
+      "description": "Configure all ECS tasks to ship container logs to CloudWatch Log Groups per service. Define CloudWatch alarms for ECS service stability and ALB 5xx error rate. Extend the Jenkinsfile ECS deploy stage to detect deployment failures and execute an automated rollback to the previous task definition revision.",
+      "labels": ["observability", "cloudwatch", "monitoring", "rollback", "ecs"],
+      "priority": "Medium",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "All service logs appear in CloudWatch under named log groups",
+          "given": "an ECS task is running for any service",
+          "when": "the service writes a log line",
+          "then": "the log appears in CloudWatch under /loanflow/{env}/{service-name} within 30 seconds"
+        },
+        {
+          "scenario": "Jenkins pipeline rolls back on failed ECS deployment",
+          "given": "a new task definition revision fails health checks during rolling deployment",
+          "when": "ECS does not reach stable state within the wait timeout",
+          "then": "the Jenkinsfile catch block triggers aws ecs update-service with the previous task definition revision and marks the build as failed"
+        },
+        {
+          "scenario": "CloudWatch alarm fires on elevated ALB 5xx rate",
+          "given": "a CloudWatch alarm is configured for ALB HTTPCode_Target_5XX_Count",
+          "when": "the error count exceeds the threshold across two consecutive evaluation periods",
+          "then": "the alarm transitions to ALARM state and an SNS notification is published"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Configure awslogs log driver in all ECS task definitions",
+          "description": "Add logConfiguration blocks to each task definition using the awslogs driver. Set awslogs-group to /loanflow/{env}/{service-name} and enable awslogs-create-group."
+        },
+        {
+          "summary": "Create CloudWatch alarms for ECS service health and ALB error rate",
+          "description": "Define alarms for ECS running task count dropping below desired count and ALB 5xx rate exceeding 1% over a 5-minute window. Wire alarms to an SNS topic for notification."
+        },
+        {
+          "summary": "Add rollback step to Jenkinsfile ECS deploy stage",
+          "description": "Wrap the aws ecs wait services-stable call in a try-catch. On timeout or failure, retrieve the previous task definition ARN and call aws ecs update-service to initiate rollback. Post rollback status to the GitHub commit."
+        }
+      ]
+    }
+  ]
+}

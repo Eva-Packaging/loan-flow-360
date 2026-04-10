@@ -1,0 +1,221 @@
+{
+  "summary": "Document Management Service — Data Layer Foundation",
+  "description": "Establish the complete data persistence layer for the document-service. This epic covers all configuration, schema, and ORM work required before document upload, verification, and S3 integration features can be built. It spans service profile configuration, Flyway-managed schema creation for application_documents, document_requirements, and document_verification_audit, JPA entity mapping, repository setup, and the test infrastructure needed to validate migration and entity alignment without requiring a running database.\n\nThe processed_events table is intentionally excluded from this epic — it supports Kafka idempotent consumption and belongs to the event-driven workflow epic.\n\nStories in this epic are sourced from:\n- story-document-application-properties.json\n- stories-document-schema.json (migrations, ApplicationDocument entity, DocumentRequirement and DocumentVerificationAudit entities)\n\nThe Docker Compose MySQL infrastructure story is excluded — it is tracked under a separate infrastructure epic.",
+  "labels": [
+    "document-service",
+    "data-layer",
+    "jpa",
+    "flyway",
+    "schema",
+    "mysql",
+    "sprint-5",
+    "module-4"
+  ],
+  "priority": "High",
+  "userType": "backend developer owning the Document Management Service",
+  "functionality": "configure the service's data layer including database connectivity, schema migrations, JPA entities for document tracking, document requirements, and verification audit, and test infrastructure",
+  "benefit": "so the document service has a validated persistence foundation that document upload, S3 integration, and verification workflow features can build on without schema drift between environments",
+  "stories": [
+    {
+      "summary": "Configure application properties across base, dev, and test profiles for document-service",
+      "description": "The document-service is scaffolded with a base application.yaml in place. This story adds the required Maven dependencies for persistence, migration, and validation, defines environment variables for the document database, and populates application-dev.yaml and application-test.yaml so the service can start, connect to MySQL, run Flyway migrations, and run tests in isolation against H2 without requiring a running database instance.\n\nNote: infra/mysql/init/01_init.sql must be updated to provision the loanflow_document_db database and grant the application user access. This depends on the Docker Compose MySQL infrastructure story.\n\nNote: processed_events table is excluded from this epic — it is part of the Kafka idempotency pattern introduced in the event-driven workflow epic.",
+      "labels": [
+        "document-service",
+        "configuration",
+        "jpa",
+        "flyway",
+        "mysql",
+        "spring-boot",
+        "profiles"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Service starts and runs Flyway migrations on dev profile",
+          "given": "the MySQL container is running and environment variables are set from .env",
+          "when": "the document-service starts with the dev profile",
+          "then": "Flyway runs migration scripts from classpath:db/migration against loanflow_document_db and JPA validates the schema without attempting to auto-create tables"
+        },
+        {
+          "scenario": "Tests run Flyway migrations against H2 and validate entity mappings",
+          "given": "the test profile is active and no MySQL instance is running",
+          "when": "mvnw test is executed",
+          "then": "Flyway runs all migration scripts against H2 in-memory, Hibernate validates entity mappings against the migrated schema, and the context loads without error"
+        },
+        {
+          "scenario": "No credentials are hardcoded in source",
+          "given": "a developer inspects application-dev.yaml",
+          "when": "they review the datasource configuration",
+          "then": "all connection values are resolved from environment variables with inline defaults and no plaintext credentials appear in committed files"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add JPA, MySQL, Flyway, Validation, and H2 dependencies to pom.xml",
+          "description": "Add the following dependencies to the document-service pom.xml:\n\n- spring-boot-starter-data-jpa\n- spring-boot-starter-validation\n- mysql-connector-j (runtime scope)\n- flyway-core\n- com.h2database:h2 (test scope only)\n\nEnsure versions are compatible with Spring Boot 3.5.13."
+        },
+        {
+          "summary": "Add document database environment variables to infra/.env.example",
+          "description": "Append document-service database variables to infra/.env.example under a labelled comment block:\n\n# Document Service\nDOCUMENT_DB_NAME=loanflow_document_db\n\nThe shared DATABASE_HOST, DATABASE_PORT, DATABASE_USER, DATABASE_PASSWORD, and MYSQL_ROOT_PASSWORD variables are reused from the base MySQL block.\n\nAlso update infra/mysql/init/01_init.sql to provision the document database:\nCREATE DATABASE IF NOT EXISTS loanflow_document_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\nGRANT ALL PRIVILEGES ON loanflow_document_db.* TO '${DATABASE_USER}'@'%';\nFLUSH PRIVILEGES;"
+        },
+        {
+          "summary": "Configure datasource, JPA, and Flyway in application-dev.yaml",
+          "description": "Populate application-dev.yaml with server port, datasource, JPA, and Flyway settings. Each connection part must use environment variable substitution with inline defaults:\n\nserver:\n  port: 8083\n\nspring:\n  datasource:\n    url: jdbc:mysql://${DATABASE_HOST:localhost}:${DATABASE_PORT:3306}/${DOCUMENT_DB_NAME:loanflow_document_db}\n    username: ${DATABASE_USER:loanflow}\n    password: ${DATABASE_PASSWORD:password}\n  jpa:\n    hibernate:\n      ddl-auto: validate\n    show-sql: true\n    properties:\n      hibernate:\n        dialect: org.hibernate.dialect.MySQLDialect\n        format_sql: true\n  flyway:\n    enabled: true\n    locations: classpath:db/migration"
+        },
+        {
+          "summary": "Configure application-test.yaml to run Flyway against H2 with schema validation",
+          "description": "Populate application-test.yaml so tests run Flyway migrations against H2 in-memory and validate entity mappings against the migrated schema without requiring MySQL or Docker:\n\nspring:\n  datasource:\n    url: jdbc:h2:mem:loanflow_document_test;DB_CLOSE_DELAY=-1;MODE=MySQL;NON_KEYWORDS=VALUE\n    driver-class-name: org.h2.Driver\n    username: sa\n    password:\n  jpa:\n    hibernate:\n      ddl-auto: validate\n    show-sql: true\n  flyway:\n    enabled: true\n    locations: classpath:db/migration\n\nNote: migration SQL must be written to the H2-compatible subset. Avoid ON UPDATE CURRENT_TIMESTAMP and ENGINE=InnoDB."
+        }
+      ]
+    },
+    {
+      "summary": "Create Flyway migration scripts for document service schema",
+      "description": "Write the SQL migration scripts that define the document service database schema across three tables: application_documents, document_requirements, and document_verification_audit. The processed_events table is excluded — it belongs to the Kafka idempotency pattern introduced in the event-driven workflow epic. Migrations run in order via Flyway against MySQL 8 in dev and against H2 in MySQL mode in the test profile. All SQL must be written to the common subset supported by both targets: avoid ON UPDATE CURRENT_TIMESTAMP, ENGINE=InnoDB, and MySQL-specific index syntax not supported by H2. Each table is defined in its own versioned file under src/main/resources/db/migration.",
+      "labels": [
+        "document-service",
+        "flyway",
+        "schema",
+        "mysql",
+        "database"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Flyway runs all migrations cleanly on dev startup",
+          "given": "the MySQL container is running and the document-service starts with the dev profile",
+          "when": "Flyway executes",
+          "then": "all three migration scripts apply in order without errors and the flyway_schema_history table records each as success"
+        },
+        {
+          "scenario": "Schema matches JPA entity expectations",
+          "given": "migrations have been applied",
+          "when": "the document-service starts with ddl-auto set to validate",
+          "then": "Hibernate validates all entity mappings against the schema without throwing a validation exception"
+        },
+        {
+          "scenario": "Migrations execute against H2 in test profile and entities validate",
+          "given": "the test profile is active with Flyway enabled against H2 and ddl-auto set to validate",
+          "when": "mvnw test is executed",
+          "then": "Flyway runs all migration scripts against H2 without error and Hibernate validates all entity mappings against the migrated schema"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create V1__create_application_documents.sql",
+          "description": "Define the application_documents table:\n\n- document_id BIGINT AUTO_INCREMENT PRIMARY KEY\n- application_id BIGINT NOT NULL\n- document_type VARCHAR(50) NOT NULL\n- file_name VARCHAR(255) NOT NULL\n- storage_key VARCHAR(500) NOT NULL\n- content_type VARCHAR(100) NOT NULL\n- file_size_bytes BIGINT NOT NULL\n- upload_status VARCHAR(30) NOT NULL\n- verification_status VARCHAR(30) NOT NULL\n- uploaded_by_user_id BIGINT NOT NULL\n- uploaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n- verified_at TIMESTAMP NULL\n\nConstraints:\n- UNIQUE on storage_key\n\nIndexes:\n- INDEX on application_id\n- COMPOSITE INDEX on (application_id, document_type)\n- INDEX on verification_status\n\nH2 compatibility: omit ENGINE=InnoDB and DEFAULT CHARSET clauses. Do not use ON UPDATE CURRENT_TIMESTAMP — updated fields will be managed at the application layer."
+        },
+        {
+          "summary": "Create V2__create_document_requirements.sql",
+          "description": "Define the document_requirements table. This is standalone reference data that defines which document types are required per loan type:\n\n- requirement_id BIGINT AUTO_INCREMENT PRIMARY KEY\n- loan_type VARCHAR(50) NOT NULL\n- document_type VARCHAR(50) NOT NULL\n- required_flag BOOLEAN NOT NULL DEFAULT TRUE\n- display_order INT NOT NULL DEFAULT 0\n- active_flag BOOLEAN NOT NULL DEFAULT TRUE\n\nConstraints:\n- COMPOSITE UNIQUE on (loan_type, document_type)\n\nSeed data — insert base document requirements as part of this migration:\nINSERT INTO document_requirements (loan_type, document_type, required_flag, display_order, active_flag) VALUES\n  ('PERSONAL', 'GOVERNMENT_ID', TRUE, 1, TRUE),\n  ('PERSONAL', 'PROOF_OF_INCOME', TRUE, 2, TRUE),\n  ('PERSONAL', 'BANK_STATEMENT', TRUE, 3, TRUE),\n  ('AUTO', 'GOVERNMENT_ID', TRUE, 1, TRUE),\n  ('AUTO', 'PROOF_OF_INCOME', TRUE, 2, TRUE),\n  ('AUTO', 'BANK_STATEMENT', TRUE, 3, TRUE),\n  ('MORTGAGE', 'GOVERNMENT_ID', TRUE, 1, TRUE),\n  ('MORTGAGE', 'PROOF_OF_INCOME', TRUE, 2, TRUE),\n  ('MORTGAGE', 'BANK_STATEMENT', TRUE, 3, TRUE),\n  ('MORTGAGE', 'TAX_RETURN', TRUE, 4, TRUE),\n  ('MORTGAGE', 'PROPERTY_VALUATION', TRUE, 5, TRUE),\n  ('BUSINESS', 'GOVERNMENT_ID', TRUE, 1, TRUE),\n  ('BUSINESS', 'BANK_STATEMENT', TRUE, 2, TRUE),\n  ('BUSINESS', 'TAX_RETURN', TRUE, 3, TRUE),\n  ('BUSINESS', 'EMPLOYMENT_LETTER', TRUE, 4, TRUE);\n\nH2 compatibility: omit ENGINE=InnoDB and DEFAULT CHARSET clauses."
+        },
+        {
+          "summary": "Create V3__create_document_verification_audit.sql",
+          "description": "Define the document_verification_audit table as an append-only record of officer verification actions:\n\n- verification_audit_id BIGINT AUTO_INCREMENT PRIMARY KEY\n- document_id BIGINT NOT NULL\n- verified_by_user_id BIGINT NOT NULL\n- verification_result VARCHAR(30) NOT NULL\n- notes VARCHAR(500) NULL\n- verified_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n\nConstraints:\n- FOREIGN KEY (document_id) REFERENCES application_documents(document_id)\n\nIndexes:\n- INDEX on document_id\n- INDEX on verified_at\n\nH2 compatibility: omit ENGINE=InnoDB and DEFAULT CHARSET clauses. Do not use ON UPDATE CURRENT_TIMESTAMP."
+        }
+      ]
+    },
+    {
+      "summary": "Create ApplicationDocument JPA entity and repository",
+      "description": "Implement the ApplicationDocument JPA entity and its supporting enums mapped to the application_documents table, along with its Spring Data repository. ApplicationDocument is the aggregate root for the document service — all verification audit records belong to a document. All field names, column mappings, and constraints must align with the V1 Flyway migration.",
+      "labels": [
+        "document-service",
+        "jpa",
+        "entity",
+        "repository",
+        "application-document"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "ApplicationDocument entity validates against the migrated schema",
+          "given": "Flyway migrations have run and ddl-auto is set to validate",
+          "when": "the document-service starts",
+          "then": "Hibernate validates ApplicationDocument against application_documents without error"
+        },
+        {
+          "scenario": "Repository can persist and retrieve a document record",
+          "given": "a valid ApplicationDocument entity is constructed",
+          "when": "it is saved via ApplicationDocumentRepository",
+          "then": "it is persisted and can be retrieved by document_id and by application_id"
+        },
+        {
+          "scenario": "Unique constraint prevents duplicate storage keys",
+          "given": "an ApplicationDocument with a given storage_key already exists",
+          "when": "a second ApplicationDocument is saved with the same storage_key",
+          "then": "a DataIntegrityViolationException is thrown"
+        },
+        {
+          "scenario": "Repository supports filtering by application and verification status",
+          "given": "multiple documents exist for the same application with varying verification statuses",
+          "when": "the repository is queried by application_id and verification_status",
+          "then": "only matching records are returned"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create DocumentType, UploadStatus, and VerificationStatus enums",
+          "description": "Create enums under com.loanflow.documentservice.entity.enums:\n\nDocumentType: GOVERNMENT_ID, PROOF_OF_INCOME, BANK_STATEMENT, TAX_RETURN, EMPLOYMENT_LETTER, PROPERTY_VALUATION, PAY_STUB\n\nUploadStatus: PENDING, UPLOADED, FAILED\n\nVerificationStatus: PENDING_REVIEW, VERIFIED, REJECTED, REQUIRES_RESUBMISSION\n\nAnnotate with @Enumerated(EnumType.STRING) where used in entities to persist the string value rather than ordinal."
+        },
+        {
+          "summary": "Create ApplicationDocument JPA entity",
+          "description": "Create com.loanflow.documentservice.entity.ApplicationDocument mapped to the application_documents table:\n\n- @Id @GeneratedValue documentId\n- applicationId (BIGINT, not null)\n- documentType (@Enumerated STRING)\n- fileName (VARCHAR 255)\n- storageKey (VARCHAR 500, unique)\n- contentType (VARCHAR 100)\n- fileSizeBytes (BIGINT)\n- uploadStatus (@Enumerated STRING)\n- verificationStatus (@Enumerated STRING, default PENDING_REVIEW)\n- uploadedByUserId (BIGINT)\n- uploadedAt (@CreationTimestamp, updatable = false)\n- verifiedAt (nullable — set when verification_status transitions to VERIFIED or REJECTED)\n- auditRecords: @OneToMany(mappedBy = \"document\", fetch = FetchType.LAZY, cascade = ALL)\n\nAnnotate with @Entity, @Table(name = \"application_documents\"), @Getter, @Setter, @NoArgsConstructor, @Builder from Lombok."
+        },
+        {
+          "summary": "Create ApplicationDocumentRepository",
+          "description": "Create com.loanflow.documentservice.repository.ApplicationDocumentRepository extending JpaRepository<ApplicationDocument, Long>.\n\nInclude the following query methods:\n- findByApplicationId(Long applicationId) returning List<ApplicationDocument>\n- findByApplicationIdAndDocumentType(Long applicationId, DocumentType documentType) returning Optional<ApplicationDocument>\n- findByApplicationIdAndVerificationStatus(Long applicationId, VerificationStatus status) returning List<ApplicationDocument>\n- countByApplicationIdAndVerificationStatus(Long applicationId, VerificationStatus status) returning long (used to check if all required docs are verified)\n- existsByStorageKey(String storageKey) returning boolean"
+        }
+      ]
+    },
+    {
+      "summary": "Create DocumentRequirement and DocumentVerificationAudit JPA entities and repositories",
+      "description": "Implement the DocumentRequirement entity mapped to the document_requirements reference data table, and the DocumentVerificationAudit entity mapped to the document_verification_audit table. DocumentRequirement is standalone reference data seeded at migration time and drives the required document checklist logic. DocumentVerificationAudit is append-only and records each officer verification action against a document. All mappings must align with the V2 and V3 Flyway migrations.",
+      "labels": [
+        "document-service",
+        "jpa",
+        "entity",
+        "repository",
+        "document-requirements",
+        "verification-audit"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "DocumentRequirement and DocumentVerificationAudit validate against migrated schema",
+          "given": "all three Flyway migrations have run and ddl-auto is validate",
+          "when": "the document-service starts",
+          "then": "Hibernate validates both entities without error"
+        },
+        {
+          "scenario": "Document requirements are queryable by loan type",
+          "given": "seed data from V2 migration has been applied",
+          "when": "the repository is queried for active requirements for loan type MORTGAGE",
+          "then": "all five MORTGAGE requirement records are returned ordered by display_order"
+        },
+        {
+          "scenario": "Verification audit records are appended without modifying the document",
+          "given": "an ApplicationDocument exists with verificationStatus PENDING_REVIEW",
+          "when": "an officer saves a DocumentVerificationAudit record referencing that document",
+          "then": "the audit record is persisted and retrievable by document_id without altering the original document row"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create VerificationResult enum",
+          "description": "Create enum under com.loanflow.documentservice.entity.enums:\n\nVerificationResult: APPROVED, REJECTED, REQUIRES_RESUBMISSION\n\nAnnotate with @Enumerated(EnumType.STRING) where used in entities."
+        },
+        {
+          "summary": "Create DocumentRequirement entity and repository",
+          "description": "Create com.loanflow.documentservice.entity.DocumentRequirement mapped to the document_requirements table. This is reference data and should not be modified at runtime:\n\n- @Id @GeneratedValue requirementId\n- loanType (@Enumerated STRING — reuses LoanType enum from shared context, or use a local String field)\n- documentType (@Enumerated STRING)\n- requiredFlag (BOOLEAN)\n- displayOrder (INT)\n- activeFlag (BOOLEAN)\n\nAnnotate with @Entity, @Table(name = \"document_requirements\"), @Getter, @NoArgsConstructor, @Builder from Lombok. Omit @Setter to discourage runtime mutation.\n\nCreate DocumentRequirementRepository extending JpaRepository<DocumentRequirement, Long>:\n- findByLoanTypeAndActiveFlagTrueOrderByDisplayOrderAsc(String loanType) returning List<DocumentRequirement>\n- findByLoanTypeAndDocumentTypeAndActiveFlagTrue(String loanType, DocumentType documentType) returning Optional<DocumentRequirement>"
+        },
+        {
+          "summary": "Create DocumentVerificationAudit entity and repository",
+          "description": "Create com.loanflow.documentservice.entity.DocumentVerificationAudit mapped to document_verification_audit. This entity is append-only — no update operations should be performed on it:\n\n- @Id @GeneratedValue verificationAuditId\n- @ManyToOne @JoinColumn(name = \"document_id\") document\n- verifiedByUserId (BIGINT)\n- verificationResult (@Enumerated STRING)\n- notes (VARCHAR 500, nullable)\n- verifiedAt (@CreationTimestamp, updatable = false)\n\nAnnotate with @Entity, @Table(name = \"document_verification_audit\"), @Getter, @NoArgsConstructor, @Builder from Lombok. Omit @Setter to enforce append-only access pattern.\n\nCreate DocumentVerificationAuditRepository extending JpaRepository<DocumentVerificationAudit, Long>:\n- findByDocument_DocumentIdOrderByVerifiedAtAsc(Long documentId) returning List<DocumentVerificationAudit>\n- findTopByDocument_DocumentIdOrderByVerifiedAtDesc(Long documentId) returning Optional<DocumentVerificationAudit>"
+        }
+      ]
+    }
+  ]
+}

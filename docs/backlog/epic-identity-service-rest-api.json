@@ -1,0 +1,191 @@
+{
+  "summary": "Identity Service REST API Foundation",
+  "description": "Establish the Identity Service data layer and REST API scaffolding to support user identity, role management, and the authentication endpoints required by downstream services. This epic covers the normalized schema for users, roles, and session management, JPA entity mapping, Spring Data repositories, and a structured controller layer ready for JWT security integration in Sprint 3. Aligns with Sprint 2 objectives: JPA fundamentals, normalized relational schema design, and REST API scaffolding.",
+  "labels": ["identity-service", "spring-boot", "jpa", "rest-api", "sprint-2"],
+  "priority": "High",
+  "userType": "authenticated user",
+  "functionality": "manage user identity and access roles through a secure, structured API layer",
+  "benefit": "all downstream services and the frontend can authenticate users and enforce role-based access control consistently",
+  "stories": [
+    {
+      "summary": "Define identity schema with Flyway migrations",
+      "description": "Create the normalized relational schema for the Identity Service using Flyway migrations. Covers users, roles, user_roles (many-to-many join table), and refresh_tokens tables as defined in the database schema documentation. Includes indexes and constraints per the schema spec.",
+      "labels": ["identity-service", "flyway", "schema", "jpa"],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Schema applied on startup",
+          "given": "the Identity Service starts with a clean or versioned database",
+          "when": "Flyway runs on application startup",
+          "then": "users, roles, user_roles, and refresh_tokens tables are created with correct columns, constraints, and indexes"
+        },
+        {
+          "scenario": "Unique constraints enforced",
+          "given": "the users table exists",
+          "when": "a duplicate username or email is inserted",
+          "then": "a unique constraint violation is returned"
+        },
+        {
+          "scenario": "Many-to-many role assignment",
+          "given": "user_roles table exists",
+          "when": "a user is assigned multiple roles",
+          "then": "each assignment is persisted as a separate row with user_id and role_id"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create V1 Flyway migration for users table",
+          "description": "Write Flyway migration script to create the users table with user_id, username, email, password_hash, first_name, last_name, status, created_at, updated_at. Add unique indexes on username and email and an index on status."
+        },
+        {
+          "summary": "Create V2 Flyway migration for roles and user_roles tables",
+          "description": "Write Flyway migration to create roles (role_id, role_code, role_name, description) with unique index on role_code, and user_roles (user_id, role_id, assigned_at) with composite primary key and foreign keys referencing users and roles."
+        },
+        {
+          "summary": "Create V3 Flyway migration for refresh_tokens table",
+          "description": "Write Flyway migration to create refresh_tokens (refresh_token_id, user_id, token_value, expires_at, revoked, created_at). Add unique index on token_value and indexes on user_id and expires_at."
+        },
+        {
+          "summary": "Seed roles reference data",
+          "description": "Write a Flyway migration to insert the three base roles: APPLICANT, LOAN_OFFICER, ADMIN into the roles table."
+        }
+      ]
+    },
+    {
+      "summary": "Implement JPA entities and Spring Data repositories for Identity Service",
+      "description": "Map the identity schema to JPA entities using Spring Data JPA. Implement User, Role, UserRole, and RefreshToken entities with correct relationships and create Spring Data repositories for each with custom query methods required by the auth workflow.",
+      "labels": ["identity-service", "jpa", "hibernate", "spring-data"],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "User entity persists and retrieves correctly",
+          "given": "a User entity is created with valid fields",
+          "when": "saved through UserRepository",
+          "then": "the user is persisted and can be retrieved by user_id, username, or email"
+        },
+        {
+          "scenario": "Role relationship loads correctly",
+          "given": "a user has been assigned roles via user_roles",
+          "when": "the user is fetched with roles",
+          "then": "the associated Role entities are returned as a collection on the User"
+        },
+        {
+          "scenario": "RefreshToken associated with user",
+          "given": "a refresh token record is created for a user",
+          "when": "queried by user_id or token_value",
+          "then": "the matching RefreshToken entity is returned"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create User JPA entity",
+          "description": "Define User entity mapped to users table. Map all columns as fields. Map many-to-many relationship to Role via user_roles join table using @ManyToMany and @JoinTable."
+        },
+        {
+          "summary": "Create Role JPA entity",
+          "description": "Define Role entity mapped to roles table with role_id, role_code, role_name, description fields."
+        },
+        {
+          "summary": "Create RefreshToken JPA entity",
+          "description": "Define RefreshToken entity mapped to refresh_tokens table. Include @ManyToOne foreign key reference to User entity."
+        },
+        {
+          "summary": "Implement UserRepository, RoleRepository, and RefreshTokenRepository",
+          "description": "Create Spring Data JPA repositories. UserRepository: findByUsername, findByEmail. RoleRepository: findByRoleCode. RefreshTokenRepository: findByTokenValue, findAllByUserIdAndRevokedFalse."
+        }
+      ]
+    },
+    {
+      "summary": "Scaffold Identity Service controller and service layer",
+      "description": "Establish the controller-service-repository layered architecture for the Identity Service. Create the AuthController with endpoint stubs for POST /api/v1/auth/login, POST /api/v1/auth/refresh, and GET /api/v1/auth/me. Implement AuthService and UserService skeletons. Wire DTO classes for all request and response shapes. Placeholder implementations return 501 Not Implemented until JWT security is added in Sprint 3.",
+      "labels": ["identity-service", "rest-api", "controller", "dto"],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Controller endpoints are reachable",
+          "given": "the Identity Service is running",
+          "when": "POST /api/v1/auth/login is called",
+          "then": "the endpoint is reachable and returns a structured response"
+        },
+        {
+          "scenario": "Missing credentials return validation error",
+          "given": "a login request is submitted without a username or password",
+          "when": "the request reaches the AuthController",
+          "then": "a 400 Bad Request is returned with a validation error message"
+        },
+        {
+          "scenario": "User profile response shape matches API spec",
+          "given": "GET /api/v1/auth/me is called",
+          "when": "the response is returned",
+          "then": "the response body includes id, username, fullName, role, and permissions fields"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create LoginRequestDto and LoginResponseDto",
+          "description": "Define LoginRequestDto (username, password) with @NotBlank validation. Define LoginResponseDto (accessToken, tokenType, expiresIn, user object with id, username, role)."
+        },
+        {
+          "summary": "Create RefreshTokenRequestDto and UserProfileDto",
+          "description": "Define RefreshTokenRequestDto (refreshToken field with @NotBlank). Define UserProfileDto (id, username, fullName, role, permissions list)."
+        },
+        {
+          "summary": "Implement AuthController with endpoint stubs",
+          "description": "Create AuthController at /api/v1/auth with stub handlers for POST /login, POST /refresh, and GET /me. Apply @Valid to request bodies. Return 501 placeholder responses."
+        },
+        {
+          "summary": "Implement AuthService and UserService skeletons",
+          "description": "Create AuthService with method signatures for login(LoginRequestDto), refreshToken(String), and getCurrentUser(Long). Create UserService with findByUsername and findById. Wire repositories into services."
+        },
+        {
+          "summary": "Add global exception handler for identity service",
+          "description": "Create @RestControllerAdvice that handles MethodArgumentNotValidException and returns standardized 400 error responses matching the platform error payload shape (timestamp, status, error, message, path)."
+        }
+      ]
+    },
+    {
+      "summary": "Configure multi-profile application properties for Identity Service",
+      "description": "Set up application.yaml and application-dev.yaml for the Identity Service. Configure datasource, JPA, Flyway, and server port 8081 per environment. Ensure H2 in-memory database is usable for default/test profile and MySQL is wired for the dev profile.",
+      "labels": ["identity-service", "configuration", "spring-profiles", "flyway"],
+      "priority": "Medium",
+      "storyPoints": 2,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Service starts with dev profile against MySQL",
+          "given": "the Identity Service is started with the dev profile",
+          "when": "the application initializes",
+          "then": "it connects to MySQL, Flyway runs migrations, and the service is available on port 8081"
+        },
+        {
+          "scenario": "Service starts with default profile against H2",
+          "given": "no active profile is specified",
+          "when": "the application initializes",
+          "then": "H2 in-memory database is used and Flyway applies all schema migrations against H2"
+        },
+        {
+          "scenario": "Actuator health reports database status",
+          "given": "the service is running",
+          "when": "GET /actuator/health is called",
+          "then": "status UP is returned with a db component status included"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Configure base application.yaml",
+          "description": "Set server.port=8081, spring.application.name=identity-service. Configure H2 datasource as default, Flyway enabled, and JPA show-sql disabled."
+        },
+        {
+          "summary": "Configure application-dev.yaml for MySQL",
+          "description": "Override datasource URL, username, password, and driver class for MySQL dev environment using environment variable references. Set Flyway validate mode and JPA ddl-auto to validate."
+        },
+        {
+          "summary": "Verify H2 and MySQL connector dependencies in pom.xml",
+          "description": "Confirm pom.xml includes H2 (test scope) and MySQL Connector/J (runtime scope). Add if missing."
+        }
+      ]
+    }
+  ]
+}
