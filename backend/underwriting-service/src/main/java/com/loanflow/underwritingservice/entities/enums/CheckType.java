@@ -1,4 +1,4 @@
-package com.loanflow.underwritingservice.entites.enums;
+package com.loanflow.underwritingservice.entities.enums;
 
 public enum CheckType {
     DEBT_TO_INCOME,

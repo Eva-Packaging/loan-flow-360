@@ -1,7 +1,7 @@
 package com.loanflow.underwritingservice.repository;
 
-import com.loanflow.underwritingservice.entites.UnderwritingCase;
-import com.loanflow.underwritingservice.entites.enums.CaseStatus;
+import com.loanflow.underwritingservice.entities.UnderwritingCase;
+import com.loanflow.underwritingservice.entities.enums.CaseStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;

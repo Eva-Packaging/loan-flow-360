@@ -1,7 +1,7 @@
-package com.loanflow.underwritingservice.entites;
+package com.loanflow.underwritingservice.entities;
 
-import com.loanflow.underwritingservice.entites.enums.CheckStatus;
-import com.loanflow.underwritingservice.entites.enums.CheckType;
+import com.loanflow.underwritingservice.entities.enums.CheckStatus;
+import com.loanflow.underwritingservice.entities.enums.CheckType;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
