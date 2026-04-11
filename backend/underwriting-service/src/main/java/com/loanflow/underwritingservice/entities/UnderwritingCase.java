@@ -1,8 +1,8 @@
-package com.loanflow.underwritingservice.entites;
+package com.loanflow.underwritingservice.entities;
 
 
-import com.loanflow.underwritingservice.entites.enums.CaseStatus;
-import com.loanflow.underwritingservice.entites.enums.DecisionStatus;
+import com.loanflow.underwritingservice.entities.enums.CaseStatus;
+import com.loanflow.underwritingservice.entities.enums.DecisionStatus;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;

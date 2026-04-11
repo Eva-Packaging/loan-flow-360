@@ -1,7 +1,7 @@
 package com.loanflow.underwritingservice.repository;
 
-import com.loanflow.underwritingservice.entites.UnderwritingChecks;
-import com.loanflow.underwritingservice.entites.enums.CheckType;
+import com.loanflow.underwritingservice.entities.UnderwritingChecks;
+import com.loanflow.underwritingservice.entities.enums.CheckType;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
