@@ -255,6 +255,11 @@ Return this structure only when asked for **story creation**:
 - Do not add extra fields outside the requested schema
 - Keep property names exactly as defined
 
+**Description Fields:**
+- wrap files/paths with `<files/paths>`
+- wrap raw code with plain ```<raw code>```
+Do not include data type with code fences. (does not format with jira upload)
+
 ### Project Creation
 
 When generating a full project:

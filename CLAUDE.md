@@ -8,6 +8,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
+### Shared Library (`loanflow-common`)
+
+`loanflow-common` is a local Maven artifact that all services depend on for shared DTOs, enums, and utilities. It must be installed into the local Maven repository before building any other service:
+
+```bash
+cd backend/loanflow-common
+./mvnw clean install -DskipTests
+```
+
 ### Backend Services (each service has its own Maven wrapper)
 
 ```bash
@@ -29,6 +38,12 @@ cd backend/<service-name>
 ```
 
 ### Frontend
+
+The frontend requires a `VITE_API_URL` environment variable pointing at the API Gateway. Create `frontend/loan-flow-360/.env.local` before running:
+
+```
+VITE_API_URL=http://localhost:8080
+```
 
 ```bash
 cd frontend/loan-flow-360
@@ -53,6 +68,7 @@ docker compose -f infra/docker-compose.yml down
 
 | Service | Port | Technology |
 |---|---|---|
+| Discovery Server | 8761 | Spring Boot, Eureka |
 | API Gateway | 8080 | Spring Boot 3.5.13, Java 17 |
 | Identity Service | 8081 | Spring Boot, MySQL |
 | Loan Application Service | 8082 | Spring Boot, MySQL |
@@ -93,8 +109,9 @@ Each service owns its own schema — there are no cross-database foreign keys. C
 
 ## Git & PR Conventions
 
-- Branch naming: `SCRUM-###-short-description`
-- **PR titles must match `SCRUM-### Short description`** — enforced by GitHub Actions (fails the build otherwise)
+- Branch naming: `LF3-###-short-description`
+- **PR titles must match `LF3-### Short description`** — enforced by `.github/workflows/pr-checks.yml` (fails the build otherwise)
+- Epic branches are cut from `main`; story/task branches are cut from their parent epic branch and merged back into it
 - Merge strategy: squash-and-merge; delete branch after merge
 - Minimum 1 approval required before merging
 

@@ -1,0 +1,260 @@
+{
+  "summary": "Implement CloudWatch Logging, Alarms, and Automated Deployment Rollback",
+  "description": "Establish the full operational observability and deployment safety layer for LoanFlow 360 on AWS ECS. This epic covers configuring all six ECS services to ship structured container logs to per-service CloudWatch Log Groups, defining CloudWatch alarms for ECS service stability and ALB error rates, creating log-based metric filters that surface application-level error patterns, wiring all alarms to an SNS notification topic, and extending the Jenkinsfile ECS deploy stage with a try-catch rollback block that automatically reverts to the previous task definition revision when a deployment fails health checks. The output is a system where every log line is queryable in CloudWatch Logs Insights, every operational failure triggers a notification, and every bad deployment self-heals without manual intervention.",
+  "labels": ["observability", "cloudwatch", "monitoring", "rollback", "ecs", "jenkins", "devops", "sns"],
+  "priority": "Medium",
+  "userType": "operations engineer",
+  "functionality": "centralise all microservice container logs in CloudWatch, alert on service instability and elevated error rates, and automatically roll back failed ECS deployments before they reach full rollout",
+  "benefit": "reduce mean time to detection for production incidents, eliminate manual rollback steps during failed deployments, and provide a queryable audit trail of every container's runtime behaviour across all environments",
+  "stories": [
+    {
+      "summary": "Configure CloudWatch Log Groups and awslogs driver for all ECS services",
+      "description": "Create a dedicated CloudWatch Log Group for each of the six LoanFlow 360 services in each environment and configure the ECS task definitions to ship all container stdout and stderr output to those groups using the awslogs log driver. Log groups follow the naming convention /loanflow/{env}/{service-name}. Retention policies are applied to prevent unbounded log storage cost: 30 days for dev, 90 days for production. The awslogs-create-group option is enabled as a safety net but pre-created log groups with explicit retention are preferred.\n\nLog groups to create:\n- /loanflow/dev/api-gateway\n- /loanflow/dev/identity-service\n- /loanflow/dev/loan-service\n- /loanflow/dev/document-service\n- /loanflow/dev/underwriting-service\n- /loanflow/dev/notification-service\n- /loanflow/prod/api-gateway\n- (and so on for all six services in prod)",
+      "labels": ["cloudwatch", "logging", "ecs", "observability", "infrastructure"],
+      "priority": "High",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "All twelve log groups exist with the correct retention policy",
+          "given": "log group provisioning is complete",
+          "when": "aws logs describe-log-groups --log-group-name-prefix /loanflow is run",
+          "then": "twelve log groups are listed — six per environment — each with retentionInDays set to 30 for dev groups and 90 for prod groups"
+        },
+        {
+          "scenario": "Container stdout output appears in CloudWatch within 30 seconds",
+          "given": "an ECS task is running with the awslogs driver configured",
+          "when": "the Spring Boot service writes a log line to stdout",
+          "then": "the log line appears in the corresponding CloudWatch Log Group under a log stream named after the ECS task ID within 30 seconds"
+        },
+        {
+          "scenario": "Log streams are named by ECS task ID for traceability",
+          "given": "a task is running and has written logs",
+          "when": "the log streams in the service log group are listed",
+          "then": "each stream name follows the pattern {container-name}/{ecs-task-id} so logs from a specific task revision can be isolated during incident review"
+        },
+        {
+          "scenario": "Task definitions reference the correct log group for their environment",
+          "given": "a dev task definition and a prod task definition are described",
+          "when": "the logConfiguration awslogs-group values are compared",
+          "then": "the dev task definition references /loanflow/dev/{service-name} and the prod task definition references /loanflow/prod/{service-name}"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Pre-create all twelve CloudWatch Log Groups with retention policies",
+          "description": "Use aws logs create-log-group to create /loanflow/dev/{service-name} and /loanflow/prod/{service-name} for all six services. Immediately apply retention policies using aws logs put-retention-policy: 30 days for all dev groups, 90 days for all prod groups. Pre-creating groups with explicit retention prevents ECS from auto-creating groups with no retention policy (which would accumulate logs indefinitely at cost)."
+        },
+        {
+          "summary": "Add awslogs logConfiguration block to all six ECS task definitions",
+          "description": "For each service task definition, add a logConfiguration block under the container definition:\n```\n\"logConfiguration\": {\n  \"logDriver\": \"awslogs\",\n  \"options\": {\n    \"awslogs-group\": \"/loanflow/{env}/{service-name}\",\n    \"awslogs-region\": \"${AWS_REGION}\",\n    \"awslogs-stream-prefix\": \"{service-name}\",\n    \"awslogs-create-group\": \"true\"\n  }\n}\n```\nRegister new task definition revisions for all six services after the update. The awslogs-create-group option is set to true as a safety net only; the log groups are expected to already exist from the pre-creation step."
+        },
+        {
+          "summary": "Verify log delivery end-to-end for all six services in the dev environment",
+          "description": "Force a new ECS task deployment for each dev service to trigger the updated task definition. For each service, tail the CloudWatch log group using aws logs tail /loanflow/dev/{service-name} --follow and confirm Spring Boot startup logs appear. Verify the log stream name includes the ECS task ID. Document any services where logs do not appear and check the ECS task execution role policy for logs:CreateLogStream and logs:PutLogEvents permissions."
+        },
+        {
+          "summary": "Confirm ECS task execution role has CloudWatch Logs write permissions",
+          "description": "Verify the loanflow-ecs-execution-role IAM policy includes logs:CreateLogGroup, logs:CreateLogStream, and logs:PutLogEvents on the resource arn:aws:logs:*:*:log-group:/loanflow/*. The AmazonECSTaskExecutionRolePolicy managed policy includes these permissions; if a custom policy is in use, add these actions explicitly. Without these permissions, ECS tasks fail to start with a ResourceInitializationError."
+        }
+      ]
+    },
+    {
+      "summary": "Define CloudWatch alarms for ECS service stability and ALB error rate",
+      "description": "Create CloudWatch alarms that detect ECS service degradation and elevated API error rates before they escalate into full outages. Alarms cover four dimensions: ECS running task count dropping below the desired count (indicates task crashes or failed deployments), ALB 5xx error rate exceeding a threshold (indicates backend failures reaching clients), per-service CPU utilisation exceeding 80 percent (indicates resource saturation), and per-service memory utilisation exceeding 80 percent. All alarms publish to a shared SNS topic. Alarms are defined for the production environment; equivalent alarms with relaxed thresholds are created for dev.",
+      "labels": ["cloudwatch", "alarms", "ecs", "alb", "monitoring", "observability"],
+      "priority": "High",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "ECS running task count alarm fires when a service loses all tasks",
+          "given": "the ECS task count alarm is configured for api-gateway with threshold 1",
+          "when": "all api-gateway tasks are stopped and the running count drops to 0",
+          "then": "the alarm transitions to ALARM state within one evaluation period and publishes a notification to the SNS topic"
+        },
+        {
+          "scenario": "ALB 5xx alarm fires when error rate exceeds 1 percent over 5 minutes",
+          "given": "the ALB HTTPCode_Target_5XX_Count alarm is configured with a sum threshold",
+          "when": "the 5xx count exceeds the threshold across two consecutive 5-minute evaluation periods",
+          "then": "the alarm transitions to ALARM state and an SNS notification is published"
+        },
+        {
+          "scenario": "CPU utilisation alarm fires before a service becomes unresponsive",
+          "given": "a CPU utilisation alarm is set at 80 percent for a service",
+          "when": "the ECS service CPU utilisation remains above 80 percent for two consecutive evaluation periods",
+          "then": "the alarm transitions to ALARM state, giving the operations team advance warning before the service starts dropping requests"
+        },
+        {
+          "scenario": "Alarms return to OK state when conditions normalise",
+          "given": "an ECS task count alarm is in ALARM state",
+          "when": "the ECS service recovers and the running task count returns to the desired value",
+          "then": "the alarm transitions back to OK state and an OK notification is published to the SNS topic"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create ECS running task count alarms for all six production services",
+          "description": "For each service in the production cluster, create a CloudWatch alarm on the ECS/ContainerInsights RunningTaskCount metric filtered by ClusterName and ServiceName. Set the threshold to less than the desired task count (e.g. < 2 for services with desiredCount 2), evaluation period 1, period 60 seconds, treat missing data as breaching. Alarm name: loanflow-prod-{service-name}-task-count-low."
+        },
+        {
+          "summary": "Create ALB 5xx error rate alarm for the production load balancer",
+          "description": "Create a CloudWatch alarm on the AWS/ApplicationELB HTTPCode_Target_5XX_Count metric for the loanflow-prod-alb. Use statistic Sum, period 300 seconds, threshold greater than the value representing 1 percent of expected request volume, evaluation periods 2, treat missing data as not breaching. Alarm name: loanflow-prod-alb-5xx-high. Add a second alarm on HTTPCode_ELB_5XX_Count to catch ALB-level errors (e.g. no healthy targets) separately."
+        },
+        {
+          "summary": "Create CPU and memory utilisation alarms for all six production services",
+          "description": "For each service, create two alarms using ECS/ContainerInsights CpuUtilized and MemoryUtilized metrics normalised against CpuReserved and MemoryReserved. Set thresholds at 80 percent utilisation, evaluation periods 2, period 300 seconds. Alarm names: loanflow-prod-{service-name}-cpu-high and loanflow-prod-{service-name}-memory-high. These are early-warning alarms; they do not indicate an outage but prompt the team to investigate scaling or memory leak root causes."
+        },
+        {
+          "summary": "Create equivalent dev environment alarms with relaxed thresholds",
+          "description": "Mirror the production alarm set for the dev environment with adjusted thresholds: task count threshold < 1 (since dev runs 1 task per service), ALB 5xx threshold higher to allow noisy dev testing, CPU/memory thresholds at 90 percent. Dev alarms publish to the same SNS topic but use a distinct alarm name prefix loanflow-dev- so notifications can be filtered or routed differently."
+        }
+      ]
+    },
+    {
+      "summary": "Configure CloudWatch log metric filters for application-level error patterns",
+      "description": "Create CloudWatch Logs metric filters that parse container log output for application-level error patterns — specifically ERROR and EXCEPTION log levels emitted by the Spring Boot services — and publish a count metric to a custom CloudWatch namespace. Alarms on these metrics fire when error volume crosses a threshold, catching application bugs that manifest as exceptions rather than HTTP 5xx codes. A CloudWatch Logs Insights saved query is created for each service to accelerate incident investigation by surfacing the most recent error stack traces in a single query.",
+      "labels": ["cloudwatch", "logging", "metric-filters", "observability", "spring-boot"],
+      "priority": "Medium",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Metric filter counts ERROR log lines and publishes to a custom namespace",
+          "given": "a metric filter is applied to the /loanflow/prod/loan-service log group",
+          "when": "the loan-service logs an ERROR-level line",
+          "then": "the LoanFlow360/ApplicationErrors metric in the custom namespace increments by 1 within the next CloudWatch metric flush interval"
+        },
+        {
+          "scenario": "Application error alarm fires when error count exceeds threshold in 5 minutes",
+          "given": "a CloudWatch alarm monitors the ApplicationErrors metric for a service",
+          "when": "more than 10 ERROR-level log lines appear in a 5-minute window",
+          "then": "the alarm transitions to ALARM state and publishes a notification to the SNS topic"
+        },
+        {
+          "scenario": "Logs Insights saved query returns the most recent exception stack traces",
+          "given": "a Logs Insights saved query is defined for a service",
+          "when": "the query is run for the last 1 hour",
+          "then": "the results show the most recent ERROR and EXCEPTION log events with their full message field, sorted by timestamp descending"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create ERROR-level log metric filters for all six production log groups",
+          "description": "For each /loanflow/prod/{service-name} log group, create a metric filter with filter pattern [level=ERROR] or { $.level = \"ERROR\" } depending on the log format. Map each filter to a CloudWatch metric in the custom namespace LoanFlow360/ApplicationErrors with metric name {service-name}-error-count, value 1, unit Count. This requires the log output to be in a consistent format; confirm Spring Boot is configured to output structured JSON logs or a parseable pattern."
+        },
+        {
+          "summary": "Configure Spring Boot structured JSON logging for all six services",
+          "description": "Add the spring-boot-starter-json logging dependency or configure logback-spring.xml in each service to output logs in JSON format with fields: timestamp, level, service, traceId, message. JSON-formatted logs allow CloudWatch metric filters to use JSON filter syntax ({ $.level = \"ERROR\" }) which is more reliable than regex-based pattern matching against unstructured text. Apply to all six services under <backend/{service-name}/src/main/resources/logback-spring.xml>."
+        },
+        {
+          "summary": "Create application error count alarms and CloudWatch Logs Insights saved queries",
+          "description": "For each service, create a CloudWatch alarm on the LoanFlow360/ApplicationErrors {service-name}-error-count metric with threshold > 10 over a 5-minute period, evaluation periods 1, treat missing data as not breaching. Create a CloudWatch Logs Insights saved query per service named LoanFlow360 - {service-name} - Recent Errors with query:\n```\nfields @timestamp, level, message, @logStream\n| filter level = \"ERROR\" or level = \"WARN\"\n| sort @timestamp desc\n| limit 50\n```"
+        }
+      ]
+    },
+    {
+      "summary": "Provision SNS notification topic and operational alert routing",
+      "description": "Create an SNS topic that receives all CloudWatch alarm state change notifications for the LoanFlow 360 production and dev environments. Configure subscriptions to route alert notifications to the operations team. A separate SNS topic is created per environment so dev noise can be filtered or routed to a lower-priority channel. All alarms defined in the monitoring stories reference these topics as their alarm actions. A test notification is triggered for each topic to confirm end-to-end delivery before the system goes live.",
+      "labels": ["aws", "sns", "monitoring", "alerting", "devops"],
+      "priority": "Medium",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "CloudWatch alarm state change publishes a message to the SNS topic",
+          "given": "an SNS topic is configured as the alarm action for a CloudWatch alarm",
+          "when": "the alarm transitions to ALARM state",
+          "then": "an SNS message is published to the topic within 60 seconds of the state transition"
+        },
+        {
+          "scenario": "SNS topic subscription receives and delivers the notification",
+          "given": "an email or endpoint subscription is confirmed on the SNS topic",
+          "when": "a message is published to the topic",
+          "then": "the subscriber receives the notification with the alarm name, state, metric value, and a direct link to the CloudWatch alarm"
+        },
+        {
+          "scenario": "Dev and production alarm notifications are routed to separate topics",
+          "given": "separate SNS topics exist for dev and production",
+          "when": "a dev alarm fires and a prod alarm fires simultaneously",
+          "then": "the dev notification is delivered only to the dev topic subscribers and the prod notification only to the prod topic subscribers"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create loanflow-prod-alerts and loanflow-dev-alerts SNS topics",
+          "description": "Create two SNS topics: loanflow-prod-alerts and loanflow-dev-alerts with encryption enabled using the default AWS-managed KMS key (aws/sns). Tag both topics with Project=loanflow-360 and Environment=prod or dev. Record the topic ARNs — they are referenced as the AlarmActions, OKActions, and InsufficientDataActions values in all CloudWatch alarm definitions."
+        },
+        {
+          "summary": "Configure SNS subscriptions for the operations team",
+          "description": "Add email subscriptions for the operations team to the loanflow-prod-alerts topic. Confirm each subscription by clicking the confirmation link sent to the subscriber email. For dev, add subscriptions to loanflow-dev-alerts for developers who want to monitor dev environment stability. If a Slack webhook is available, add an HTTPS subscription pointing to the Slack incoming webhook URL for loanflow-prod-alerts."
+        },
+        {
+          "summary": "Update all CloudWatch alarm definitions to reference the correct SNS topic ARN",
+          "description": "For every alarm created in the ECS stability, ALB error rate, CPU/memory, and application error stories, set AlarmActions and OKActions to the appropriate topic ARN: loanflow-prod-alerts for production alarms and loanflow-dev-alerts for dev alarms. This can be applied in bulk using aws cloudwatch put-metric-alarm with the --alarm-actions flag or by updating the infrastructure-as-code definitions."
+        },
+        {
+          "summary": "Trigger a test notification to validate end-to-end SNS delivery",
+          "description": "Use aws sns publish --topic-arn <loanflow-prod-alerts-arn> --message 'LoanFlow 360 SNS test notification' --subject 'Test Alert' to confirm delivery to all subscribers. Also trigger a real alarm state change by manually setting an alarm to ALARM state using aws cloudwatch set-alarm-state and confirming the formatted alarm notification arrives at all subscription endpoints."
+        }
+      ]
+    },
+    {
+      "summary": "Implement automated rollback in Jenkinsfile on ECS deployment failure",
+      "description": "Extend the ECS Deploy stage in the root Jenkinsfile to detect deployment failures and automatically execute a rollback to the previous task definition revision. The current implementation calls aws ecs update-service and aws ecs wait services-stable but has no failure handling. This story adds a try-catch block around the stability wait for each service, retrieves the prior task definition ARN on failure, re-issues update-service with the previous revision to restore the last known good state, and posts the rollback outcome to the GitHub commit status. The build is marked FAILED regardless of whether the rollback succeeds, ensuring the failed deployment is visible in the pipeline history.",
+      "labels": ["jenkins", "ci-cd", "ecs", "rollback", "deployment", "pipeline"],
+      "priority": "High",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Deployment failure triggers automatic rollback to the previous task definition",
+          "given": "a new task definition revision fails ALB health checks and does not reach stable state within the wait timeout",
+          "when": "aws ecs wait services-stable times out in the Jenkinsfile catch block",
+          "then": "the Jenkinsfile retrieves the previous task definition ARN and calls update-service with it, restoring the last healthy revision"
+        },
+        {
+          "scenario": "Build is marked FAILED after rollback regardless of rollback success",
+          "given": "a deployment failure triggers the rollback path",
+          "when": "the rollback update-service call completes",
+          "then": "the Jenkinsfile calls error() to mark the build as FAILED and the Jenkins pipeline stage turns red, even if the rollback itself succeeded"
+        },
+        {
+          "scenario": "GitHub commit status reflects the deployment failure with a link to the build",
+          "given": "the Jenkinsfile posts GitHub commit status updates",
+          "when": "the ECS deploy stage enters the catch block",
+          "then": "the GitHub commit shows a red failure status with the description 'ECS deployment failed — rollback initiated' and a URL linking to the Jenkins build log"
+        },
+        {
+          "scenario": "Successful deployments are unaffected by the rollback logic",
+          "given": "a new task definition revision passes health checks and reaches stable state",
+          "when": "aws ecs wait services-stable returns without error",
+          "then": "the try block completes normally, the catch block is not entered, and the build continues to the next stage"
+        },
+        {
+          "scenario": "Rollback failure is logged and does not mask the original deployment failure",
+          "given": "the rollback update-service call itself fails",
+          "when": "the catch block within the catch block handles the nested failure",
+          "then": "both the original deployment failure and the rollback failure are logged to the Jenkins console and the build is still marked FAILED"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Wrap each ECS update-service and wait block in a try-catch in the Jenkinsfile",
+          "description": "For each per-service ECS deploy block in the Jenkinsfile, wrap the sequence:\n```\nsh 'aws ecs update-service --cluster ${ECS_CLUSTER} --service <name> --force-new-deployment'\nsh 'aws ecs wait services-stable --cluster ${ECS_CLUSTER} --services <name>'\n```\nin a try block. The catch block receives the exception and proceeds to rollback logic. This change is applied to all six service deploy blocks — each service has its own independent try-catch so a failure in one service does not prevent rollback attempts for others."
+        },
+        {
+          "summary": "Implement previous task definition ARN retrieval in the catch block",
+          "description": "In the catch block, retrieve the current (failing) task definition ARN by running:\n```\naws ecs describe-services --cluster ${ECS_CLUSTER} --services <name> \\\n  --query 'services[0].taskDefinition' --output text\n```\nParse the revision number from the ARN (format: arn:aws:ecs:region:account:task-definition/name:revision). Decrement the revision number by 1 to derive the previous ARN. Store both as Groovy variables for use in the rollback step and the failure log message."
+        },
+        {
+          "summary": "Implement rollback update-service call and stability wait in the catch block",
+          "description": "After retrieving the previous task definition ARN, execute the rollback:\n```\nsh \"aws ecs update-service --cluster ${ECS_CLUSTER} --service <name> \\\n  --task-definition ${previousTaskDefArn}\"\nsh \"aws ecs wait services-stable --cluster ${ECS_CLUSTER} --services <name>\"\n```\nWrap this inner sequence in its own try-catch. If the rollback stability wait also fails, log 'ROLLBACK FAILED for <service> — manual intervention required' to the console. In both cases, proceed to call error() to mark the build as FAILED."
+        },
+        {
+          "summary": "Post deployment failure and rollback status to GitHub commit status",
+          "description": "In the catch block, after the rollback attempt, use the GitHub Steps plugin to post a failure commit status:\n- context: 'ECS Deploy / {service-name}'\n- state: 'failure'\n- description: 'Deployment failed — rolled back to revision {previousRevision}' (or 'Deployment failed — rollback also failed' if the rollback step threw)\n- targetUrl: the Jenkins build URL from env.BUILD_URL\nThis gives engineers a direct link from the failing GitHub commit to the full Jenkins console log without navigating through the Jenkins UI."
+        },
+        {
+          "summary": "Add deployment history summary to Jenkinsfile post block",
+          "description": "Add a post { always { } } block to the ECS Deploy stage that echoes a deployment summary table to the console: service name, deployed revision (or rolled-back revision), cluster, and final outcome (DEPLOYED / ROLLED BACK / FAILED). This summary is the first thing an engineer sees when opening the build log and avoids having to scroll through the full log to determine which services deployed successfully and which did not."
+        }
+      ]
+    }
+  ]
+}

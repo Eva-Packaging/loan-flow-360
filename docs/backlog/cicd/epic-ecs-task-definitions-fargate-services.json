@@ -1,0 +1,260 @@
+{
+  "summary": "Define ECS Task Definitions and Fargate Services for All Microservices",
+  "description": "Define and register ECS Fargate task definitions and services for all six LoanFlow 360 microservices. This epic covers ECS cluster and capacity provider provisioning, per-service task definition authoring with CPU and memory sizing, secrets and configuration injection from AWS Secrets Manager and Parameter Store, ALB and target group provisioning, and ECS service registration with rolling deployment configuration. The output is a fully operational set of ECS services reachable through the ALB, where each service pulls its container image from ECR, reads credentials from Secrets Manager at startup, and exposes Spring Boot Actuator health checks to the ALB target group health check evaluator.\n\nServices in scope:\n- api-gateway (port 8080)\n- identity-service (port 8081)\n- loan-service (port 8082)\n- document-service (port 8083)\n- underwriting-service (port 8084)\n- notification-service (port 8085)",
+  "labels": ["ecs", "fargate", "aws", "task-definitions", "alb", "deployment", "devops"],
+  "priority": "High",
+  "userType": "operations engineer",
+  "functionality": "define and register all ECS Fargate task definitions and services so that every LoanFlow 360 microservice runs on managed compute, reads secrets securely at startup, and receives traffic through a load balancer with health-check-gated routing",
+  "benefit": "eliminate server management overhead, enforce consistent container runtime configuration across environments, and guarantee that only healthy task revisions serve production traffic",
+  "stories": [
+    {
+      "summary": "Provision ECS cluster and Fargate capacity provider",
+      "description": "Create the ECS cluster that hosts all LoanFlow 360 Fargate tasks and configure the Fargate and Fargate Spot capacity providers. A separate cluster is provisioned for each environment (dev and production). CloudWatch Container Insights is enabled on both clusters to surface task-level CPU, memory, and network metrics without additional instrumentation. The cluster names are stored in Parameter Store and referenced as Jenkins global environment variables by the deployment pipeline.",
+      "labels": ["ecs", "fargate", "aws", "infrastructure", "observability"],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "ECS clusters exist for dev and production environments",
+          "given": "cluster provisioning is complete",
+          "when": "the ECS cluster list is inspected via the AWS console or CLI",
+          "then": "two clusters are present — loanflow-dev and loanflow-prod — each in ACTIVE status"
+        },
+        {
+          "scenario": "Fargate capacity provider is registered and set as the default",
+          "given": "the ECS cluster is created",
+          "when": "a task definition that omits a launch type is submitted to the cluster",
+          "then": "ECS schedules the task on Fargate using the default capacity provider strategy"
+        },
+        {
+          "scenario": "CloudWatch Container Insights is enabled on both clusters",
+          "given": "both clusters are provisioned with Container Insights enabled",
+          "when": "a running task emits CPU and memory metrics",
+          "then": "the metrics appear in CloudWatch under the ECS/ContainerInsights namespace within 5 minutes"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create loanflow-dev and loanflow-prod ECS clusters with Container Insights enabled",
+          "description": "Provision two ECS clusters using the AWS CLI or infrastructure-as-code. Set the containerInsights cluster setting to enabled on both. Tag each cluster with Environment=dev or Environment=prod and Project=loanflow-360 for cost allocation."
+        },
+        {
+          "summary": "Register Fargate and Fargate Spot capacity providers and set default strategy",
+          "description": "Associate the FARGATE and FARGATE_SPOT capacity providers with each cluster. Set the default capacity provider strategy to weight 1 on FARGATE for the production cluster. For the dev cluster, set weight 1 on FARGATE_SPOT with a base of 1 on FARGATE to reduce cost while maintaining at least one on-demand task per service."
+        },
+        {
+          "summary": "Store cluster names in Parameter Store and verify Jenkins global variable resolution",
+          "description": "Write the cluster names to Parameter Store at /loanflow/dev/ecs-cluster-name and /loanflow/prod/ecs-cluster-name. Verify that the Jenkins global environment variables ECS_CLUSTER_DEV and ECS_CLUSTER_PROD resolve to these values when a test pipeline step runs aws ecs describe-clusters --clusters ${ECS_CLUSTER_DEV}."
+        }
+      ]
+    },
+    {
+      "summary": "Write ECS Fargate task definitions for all six microservices",
+      "description": "Author ECS task definitions for each of the six LoanFlow 360 microservices. Each task definition specifies the container image URI (referencing the ECR repository and the environment tag), CPU and memory allocation appropriate to the service tier, the container port, log configuration routing to CloudWatch Logs, and a health check command that calls the Spring Boot Actuator endpoint. Task definitions reference the ECS task execution role ARN for ECR pull and secrets injection access.\n\nCPU and memory sizing per service:\n- api-gateway: 512 CPU units, 1024 MB (handles all inbound traffic)\n- identity-service: 256 CPU units, 512 MB\n- loan-service: 512 CPU units, 1024 MB (core business logic and outbox processing)\n- document-service: 256 CPU units, 512 MB\n- underwriting-service: 512 CPU units, 1024 MB (circuit breaker and external dependency calls)\n- notification-service: 256 CPU units, 512 MB (append-heavy MongoDB writes)",
+      "labels": ["ecs", "fargate", "task-definitions", "aws", "spring-boot"],
+      "priority": "High",
+      "storyPoints": 8,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Each service has a registered task definition with the correct port mapping",
+          "given": "all six task definitions are registered",
+          "when": "each task definition is described via the AWS CLI",
+          "then": "the containerPort in the port mappings matches the documented service port for each service (8080–8085)"
+        },
+        {
+          "scenario": "Task definition health check passes against the Spring Boot Actuator endpoint",
+          "given": "a task starts and the application reaches the ready state",
+          "when": "ECS evaluates the container health check",
+          "then": "the command curl -f http://localhost:<port>/actuator/health returns HTTP 200 and the health check status transitions to HEALTHY"
+        },
+        {
+          "scenario": "Container logs appear in CloudWatch under the expected log group",
+          "given": "a task is running and the application writes a log line",
+          "when": "CloudWatch Logs is queried for the service log group",
+          "then": "the log line appears under /loanflow/{env}/{service-name} within 30 seconds"
+        },
+        {
+          "scenario": "Task definition references the ECS task execution role for ECR pull",
+          "given": "a task definition is described",
+          "when": "the executionRoleArn field is inspected",
+          "then": "it matches the loanflow-ecs-execution-role ARN provisioned in the IAM setup"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Define base task definition template with common fields",
+          "description": "Create a reusable base structure for all task definitions covering: networkMode awsvpc, requiresCompatibilities FARGATE, executionRoleArn referencing loanflow-ecs-execution-role, runtimePlatform operatingSystemFamily LINUX cpuArchitecture X86_64, and logConfiguration using the awslogs driver with awslogs-group /loanflow/{env}/{service-name} and awslogs-create-group true. Each service-specific definition extends this base with its own CPU, memory, image, port, and health check values."
+        },
+        {
+          "summary": "Register task definitions for api-gateway and identity-service",
+          "description": "Register task definitions for api-gateway (512 CPU, 1024 MB, port 8080) and identity-service (256 CPU, 512 MB, port 8081). Set the container image to ${ECR_REGISTRY}/loanflow/api-gateway:${ENV_TAG} and ${ECR_REGISTRY}/loanflow/identity-service:${ENV_TAG} respectively. Add health check: command [CMD, curl, -f, http://localhost:<port>/actuator/health], interval 30, timeout 5, retries 3, startPeriod 60."
+        },
+        {
+          "summary": "Register task definitions for loan-service and document-service",
+          "description": "Register task definitions for loan-service (512 CPU, 1024 MB, port 8082) and document-service (256 CPU, 512 MB, port 8083). Apply the same health check pattern and log configuration. The loan-service startPeriod is set to 90 seconds to allow time for the outbox scheduler and Kafka producer to initialise before health checks begin."
+        },
+        {
+          "summary": "Register task definitions for underwriting-service and notification-service",
+          "description": "Register task definitions for underwriting-service (512 CPU, 1024 MB, port 8084) and notification-service (256 CPU, 512 MB, port 8085). The underwriting-service startPeriod is set to 90 seconds to accommodate the Resilience4j circuit breaker initialisation. Notification-service uses port 8085 and connects to DocumentDB rather than MySQL."
+        }
+      ]
+    },
+    {
+      "summary": "Configure Secrets Manager and Parameter Store injection into task definitions",
+      "description": "Extend each ECS task definition with secrets and environment blocks that inject service credentials and non-sensitive configuration values at container startup. Sensitive values (database passwords, JWT secret, Redis auth token, MSK SASL credentials, DocumentDB password) are sourced from AWS Secrets Manager. Non-sensitive runtime configuration (database host, Redis host, Kafka bootstrap servers, S3 bucket name) is sourced from AWS Systems Manager Parameter Store. Spring Boot application.yaml files are updated to read all externalized values from environment variables using ${ENV_VAR} substitution, removing all hardcoded values.",
+      "labels": ["ecs", "secrets-management", "aws", "security", "configuration", "spring-boot"],
+      "priority": "High",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "No plaintext credentials exist in task definitions or application config files",
+          "given": "all task definitions and Spring Boot config files are inspected",
+          "when": "a security review searches for hardcoded passwords, JWT secrets, or connection strings",
+          "then": "no plaintext credentials are found; all sensitive values reference Secrets Manager ARNs in task definition secrets blocks or ${ENV_VAR} placeholders in application.yaml"
+        },
+        {
+          "scenario": "Spring Boot service reads the correct database credentials at startup",
+          "given": "an ECS task definition secrets block references /loanflow/{env}/loan-service/db-password",
+          "when": "the loan-service task starts",
+          "then": "the Spring Boot datasource connects to RDS using the password resolved from Secrets Manager without any application code change"
+        },
+        {
+          "scenario": "Non-sensitive config values are injected from Parameter Store",
+          "given": "an ECS task definition environment block references SSM parameter paths for DB host and Redis host",
+          "when": "the task starts",
+          "then": "the Spring Boot service resolves the correct RDS endpoint and ElastiCache endpoint for its environment without reading from a bundled application.yaml"
+        },
+        {
+          "scenario": "Task starts fail if a referenced secret does not exist in Secrets Manager",
+          "given": "a task definition references a Secrets Manager ARN that does not exist",
+          "when": "ECS attempts to start the task",
+          "then": "the task transitions to STOPPED with a ResourceInitializationError citing the missing secret ARN, preventing a container from starting with unresolved credentials"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add secrets blocks to each task definition for database passwords and JWT secret",
+          "description": "For each transactional service (identity-service, loan-service, document-service, underwriting-service), add a secrets entry mapping DB_PASSWORD to the Secrets Manager ARN at /loanflow/{env}/{service-name}/db-password. Add a secrets entry mapping JWT_SECRET to /loanflow/{env}/jwt-secret for all services that validate JWT tokens (identity-service, api-gateway)."
+        },
+        {
+          "summary": "Add secrets blocks for Redis auth token and MSK SASL credentials",
+          "description": "Add a secrets entry mapping REDIS_AUTH_TOKEN to /loanflow/{env}/redis-auth-token in the task definitions for api-gateway and loan-service. Add secrets entries mapping MSK_SASL_USERNAME and MSK_SASL_PASSWORD to values in /loanflow/{env}/msk-sasl-credentials for loan-service, document-service, underwriting-service, and notification-service."
+        },
+        {
+          "summary": "Add environment blocks sourcing host and endpoint values from Parameter Store",
+          "description": "For each service, add environment entries that resolve from Parameter Store using the valueFrom field:\n- DB_HOST from /loanflow/{env}/{service-name}/db-host\n- REDIS_HOST from /loanflow/{env}/redis-host\n- KAFKA_BOOTSTRAP_SERVERS from /loanflow/{env}/msk-bootstrap-servers\n- S3_DOCUMENTS_BUCKET from /loanflow/{env}/s3-documents-bucket (document-service only)\n- DOCDB_HOST from /loanflow/{env}/docdb-host (notification-service only)"
+        },
+        {
+          "summary": "Update Spring Boot application.yaml files to read all external values from environment variables",
+          "description": "In each service's <src/main/resources/application.yaml>, replace hardcoded datasource URLs, passwords, Redis host/port, Kafka bootstrap servers, and JWT secrets with ${ENV_VAR:default} Spring property placeholders. Ensure no credentials remain in application-dev.yaml either — dev profile values should also be sourced from environment variables when running in ECS. Keep application-dev.yaml useful for local runs by providing safe localhost defaults."
+        }
+      ]
+    },
+    {
+      "summary": "Provision Application Load Balancer, HTTPS listener, and per-service target groups",
+      "description": "Create an internet-facing Application Load Balancer in the VPC public subnets to front all LoanFlow 360 ECS services. All client traffic enters through the ALB, which routes requests to the api-gateway ECS service — downstream services are not directly exposed to the ALB. A single HTTPS listener on port 443 routes /api/v1/* to the api-gateway target group. An HTTP listener on port 80 redirects all traffic to HTTPS. Each ECS service registers its tasks into a dedicated target group; the ALB evaluates target health via the /actuator/health endpoint before routing traffic to a task.",
+      "labels": ["aws", "alb", "load-balancer", "ecs", "networking", "target-groups"],
+      "priority": "High",
+      "storyPoints": 8,
+      "acceptanceCriteria": [
+        {
+          "scenario": "ALB routes all /api/v1/* requests to the api-gateway target group",
+          "given": "the HTTPS listener rule is configured",
+          "when": "a client sends a request to https://<alb-dns>/api/v1/loans",
+          "then": "the ALB forwards the request to a healthy api-gateway task on port 8080"
+        },
+        {
+          "scenario": "HTTP to HTTPS redirect is enforced",
+          "given": "the HTTP listener on port 80 has a redirect action configured",
+          "when": "a client sends a request to http://<alb-dns>/api/v1/loans",
+          "then": "the ALB returns a 301 redirect to the HTTPS equivalent URL"
+        },
+        {
+          "scenario": "ALB deregisters an unhealthy task before routing traffic to it",
+          "given": "an api-gateway task fails its /actuator/health check two consecutive times",
+          "when": "the ALB evaluates the target group",
+          "then": "the unhealthy task is marked as unhealthy and removed from the active target set; no new requests are routed to it"
+        },
+        {
+          "scenario": "ALB DNS name is resolvable and returns a valid response for a health probe",
+          "given": "the ALB is active and at least one api-gateway task is healthy",
+          "when": "curl https://<alb-dns>/actuator/health is run",
+          "then": "the response is HTTP 200 with a JSON body containing status: UP"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Provision internet-facing ALB in public subnets with the ALB security group",
+          "description": "Create an Application Load Balancer named loanflow-{env}-alb with scheme internet-facing, IP address type ipv4, and subnets set to both public subnets. Attach the loanflow-{env}-alb-sg security group (inbound 80 and 443 from 0.0.0.0/0). Enable access logging to the loanflow-{env}-documents S3 bucket under the alb-logs/ prefix."
+        },
+        {
+          "summary": "Create target groups for all six services with Actuator health check paths",
+          "description": "Create one target group per service with target type ip (required for Fargate awsvpc networking), protocol HTTP, and the service container port. Set the health check path to /actuator/health, healthy threshold 2, unhealthy threshold 3, interval 30 seconds, and timeout 5 seconds. Name each target group loanflow-{env}-{service-name}-tg."
+        },
+        {
+          "summary": "Configure HTTPS listener on port 443 with routing rules",
+          "description": "Create an HTTPS listener on port 443. Add a forward rule matching path pattern /api/v1/* to the api-gateway target group. Add a default action returning a fixed 404 response for unmatched paths. Attach an ACM certificate to the listener. (For dev environments, a self-signed certificate stored in ACM is acceptable.)"
+        },
+        {
+          "summary": "Configure HTTP listener on port 80 with redirect to HTTPS",
+          "description": "Create an HTTP listener on port 80 with a single default redirect action: protocol HTTPS, port 443, status code HTTP_301. This ensures all client traffic is encrypted in transit regardless of whether the client explicitly uses HTTPS."
+        },
+        {
+          "summary": "Record ALB DNS name in Parameter Store for frontend and API Gateway config",
+          "description": "After the ALB is created, write the ALB DNS name to Parameter Store at /loanflow/{env}/alb-dns-name. This value is used by the frontend VITE_API_URL environment variable and by any cross-service documentation that references the public entry point. Also output the ALB ARN for reference by the ECS service registration tasks."
+        }
+      ]
+    },
+    {
+      "summary": "Register ECS Fargate services with rolling deployment and deployment circuit breaker",
+      "description": "Create ECS services for all six microservices, linking each to its task definition, target group, and the ECS cluster. Each service is configured with a desired task count appropriate to the environment, a rolling deployment strategy with minimum healthy percent 50 and maximum percent 200, and the ECS deployment circuit breaker enabled to automatically roll back a failed deployment before it fully replaces the running task set. Services run in the private VPC subnets with the ECS task security group attached.",
+      "labels": ["ecs", "fargate", "deployment", "rolling-update", "aws"],
+      "priority": "High",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "All six ECS services reach steady state with desired task count",
+          "given": "all six ECS services are registered",
+          "when": "the services are described via the AWS CLI",
+          "then": "each service shows runningCount equal to desiredCount and status ACTIVE with no deployment in progress"
+        },
+        {
+          "scenario": "Rolling deployment replaces tasks without dropping below 50 percent healthy",
+          "given": "a service with desired count 2 begins a rolling deployment",
+          "when": "the deployment is in progress",
+          "then": "at least 1 task from the prior revision remains running and passing health checks before the second new-revision task is started"
+        },
+        {
+          "scenario": "Deployment circuit breaker rolls back a failing deployment automatically",
+          "given": "a new task revision fails ALB health checks on more than 50 percent of launch attempts",
+          "when": "the ECS deployment circuit breaker evaluates the rollout",
+          "then": "ECS stops launching new tasks, rolls back to the previous task definition revision, and the deployment is marked as FAILED in the service event log"
+        },
+        {
+          "scenario": "ECS service tasks run in private subnets with no public IP assigned",
+          "given": "a service task is running",
+          "when": "the task network interface is described",
+          "then": "no public IP address is assigned to the task's elastic network interface"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Register ECS services for api-gateway and identity-service",
+          "description": "Create ECS services loanflow-{env}-api-gateway and loanflow-{env}-identity-service. Set desiredCount to 2 for production and 1 for dev. Configure deploymentConfiguration with minimumHealthyPercent 50 and maximumPercent 200. Enable the deploymentCircuitBreaker with enable true and rollback true. Set networkConfiguration to use private subnets and the loanflow-{env}-ecs-sg security group with assignPublicIp DISABLED. Load balance api-gateway to its ALB target group."
+        },
+        {
+          "summary": "Register ECS services for loan-service and document-service",
+          "description": "Create ECS services loanflow-{env}-loan-service and loanflow-{env}-document-service with the same rolling deployment and circuit breaker configuration as above. Set desiredCount to 2 for production and 1 for dev. Register document-service with its ALB target group. Loan-service does not have a direct ALB rule but registers with a target group for internal health monitoring."
+        },
+        {
+          "summary": "Register ECS services for underwriting-service and notification-service",
+          "description": "Create ECS services loanflow-{env}-underwriting-service and loanflow-{env}-notification-service with the same configuration. Neither service is directly targeted by an ALB listener rule — they are accessed internally via service-to-service calls routed through the api-gateway. Register both with their target groups for health check monitoring only."
+        },
+        {
+          "summary": "Verify all six services reach steady state and pass ALB health checks",
+          "description": "After registering all services, run aws ecs wait services-stable --cluster loanflow-{env} --services <all-six-names> to confirm each service reaches steady state. For api-gateway, confirm the ALB target group shows healthy targets by running aws elbv2 describe-target-health --target-group-arn <api-gateway-tg-arn>. Document any startup failures and their resolution for the runbook."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,268 @@
+{
+  "summary": "Configure Jenkins Master on EC2 with Plugins, Credentials, and GitHub Integration",
+  "description": "Provision and fully configure a Jenkins master on an EC2 instance inside the LoanFlow 360 VPC. This epic covers EC2 instance provisioning and OS-level setup, Jenkins LTS installation and JVM tuning, required plugin installation, GitHub webhook and multibranch pipeline job configuration, global environment variable and IAM profile binding, and Jenkins security hardening. The output is a production-ready Jenkins master that automatically detects pushes to the LoanFlow 360 repository, discovers the root Jenkinsfile, and executes the CI/CD pipeline using the attached EC2 IAM role for all AWS interactions — with no stored AWS credentials.",
+  "labels": ["jenkins", "ec2", "ci-cd", "configuration", "devops", "security"],
+  "priority": "High",
+  "userType": "operations engineer",
+  "functionality": "provision and configure a self-contained Jenkins master that automatically triggers multi-service pipeline runs on every GitHub push, authenticates to AWS via instance IAM role, and enforces access controls on the CI/CD system itself",
+  "benefit": "provide a stable, auditable, and secure automation server that removes manual build and deployment steps from the development workflow without introducing credential sprawl",
+  "stories": [
+    {
+      "summary": "Provision Jenkins EC2 instance with nginx reverse proxy and storage configuration",
+      "description": "Launch a t3.medium EC2 instance in the VPC public subnet to host the Jenkins master. Install Java 17 (required for Jenkins LTS), configure a dedicated EBS volume for the Jenkins home directory, install nginx as a reverse proxy to terminate HTTP on port 80 and forward to Jenkins on port 8080, and configure the OS-level firewall to restrict inbound access. The Jenkins home directory is placed on a separate EBS volume to survive instance replacement and to allow independent snapshot-based backups.\n\nInstance placement: public subnet (Jenkins must receive inbound webhook traffic from GitHub)\nSecurity group: allow inbound 80 from 0.0.0.0/0, inbound 443 from 0.0.0.0/0, inbound 22 from admin CIDR only",
+      "labels": ["jenkins", "ec2", "nginx", "infrastructure", "devops"],
+      "priority": "High",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Jenkins UI is reachable via the EC2 public DNS on port 80",
+          "given": "the EC2 instance is running and nginx is configured",
+          "when": "a browser navigates to http://<jenkins-ec2-public-dns>",
+          "then": "the Jenkins login page loads without a port number in the URL and nginx proxies the request to port 8080"
+        },
+        {
+          "scenario": "Jenkins home directory resides on a dedicated EBS volume",
+          "given": "the EC2 instance is provisioned",
+          "when": "the filesystem layout is inspected",
+          "then": "JENKINS_HOME is set to a mount point backed by a dedicated EBS volume separate from the root volume"
+        },
+        {
+          "scenario": "SSH access is restricted to the admin CIDR only",
+          "given": "the EC2 security group inbound rules are applied",
+          "when": "an SSH connection attempt is made from an IP outside the admin CIDR",
+          "then": "the connection times out and is not established"
+        },
+        {
+          "scenario": "Java 17 is installed and recognised by Jenkins",
+          "given": "Jenkins LTS is installed on the instance",
+          "when": "the Jenkins system information page is viewed",
+          "then": "the Java version reported is 17.x and the JVM vendor is reported correctly"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Launch t3.medium EC2 instance in the VPC public subnet with the Jenkins security group",
+          "description": "Use the AWS console or CLI to launch an Amazon Linux 2023 (or Ubuntu 22.04 LTS) t3.medium instance in a public subnet. Attach the loanflow-jenkins-sg security group (inbound 80/443 from 0.0.0.0/0, inbound 22 from admin CIDR). Assign the loanflow-jenkins-role IAM instance profile at launch time."
+        },
+        {
+          "summary": "Attach and mount a dedicated EBS volume for the Jenkins home directory",
+          "description": "Attach a 50 GB gp3 EBS volume to the instance. Format it as ext4, mount it at /var/lib/jenkins, and add a persistent fstab entry. Set ownership to the jenkins OS user after Jenkins is installed. This volume is snapshotted nightly via AWS Backup."
+        },
+        {
+          "summary": "Install Java 17 and Jenkins LTS via the official Jenkins package repository",
+          "description": "Add the Jenkins LTS apt/yum repository and import the GPG key. Install the latest Jenkins LTS release and its Java 17 dependency. Enable and start the jenkins systemd service. Confirm the service reaches ACTIVE state and the initial admin password is readable from /var/lib/jenkins/secrets/initialAdminPassword."
+        },
+        {
+          "summary": "Configure nginx reverse proxy to forward port 80 to Jenkins on port 8080",
+          "description": "Install nginx. Create a server block that listens on port 80, sets proxy_pass to http://127.0.0.1:8080, and forwards Host, X-Real-IP, and X-Forwarded-For headers. Set Jenkins' own URL to http://<public-dns> in Manage Jenkins > System > Jenkins URL so generated links resolve correctly."
+        },
+        {
+          "summary": "Tune JVM heap and GC settings for Jenkins on t3.medium",
+          "description": "Edit /etc/default/jenkins (or the systemd override) to set JAVA_OPTS with -Xms512m -Xmx1536m -XX:+UseG1GC. These settings reserve enough heap for parallel builds while leaving headroom for the OS on a 4 GB instance. Restart the jenkins service and confirm startup completes without OutOfMemoryError in the jenkins.log."
+        }
+      ]
+    },
+    {
+      "summary": "Install and configure required Jenkins plugins",
+      "description": "Install the full set of Jenkins plugins required to support the LoanFlow 360 CI/CD pipeline. Plugins cover declarative pipeline syntax, Docker image operations, AWS ECR authentication, GitHub branch source discovery, JUnit test report publishing, build timeout enforcement, and pipeline step visualisation. Plugin installation is performed via the Jenkins CLI or the plugin manager REST API to support repeatable provisioning rather than manual UI clicks.",
+      "labels": ["jenkins", "plugins", "ci-cd", "configuration"],
+      "priority": "High",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Declarative pipeline syntax is available in the Jenkinsfile",
+          "given": "all pipeline plugins are installed",
+          "when": "a Jenkinsfile with a declarative pipeline { agent any stages { } } block is loaded",
+          "then": "Jenkins parses the Jenkinsfile without syntax errors and the pipeline is visualised in the Stage View"
+        },
+        {
+          "scenario": "Docker Pipeline plugin enables docker.image() and docker.build() DSL steps",
+          "given": "the Docker Pipeline plugin is installed",
+          "when": "a pipeline step calls docker.build('image-name')",
+          "then": "the step executes without an unrecognised step error"
+        },
+        {
+          "scenario": "JUnit plugin publishes test reports from Maven surefire output",
+          "given": "the JUnit plugin is installed",
+          "when": "a pipeline step calls junit 'target/surefire-reports/**/*.xml'",
+          "then": "the test results tab appears on the build page with a per-test pass/fail breakdown"
+        },
+        {
+          "scenario": "All installed plugins are at the latest stable version compatible with the Jenkins LTS release",
+          "given": "plugin installation is complete",
+          "when": "the Plugin Manager available updates list is checked",
+          "then": "no installed plugin has a pending security update"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Install Pipeline and Pipeline Stage View plugins",
+          "description": "Install the following plugins: workflow-aggregator (Pipeline), pipeline-stage-view (Stage View), pipeline-graph-analysis. These provide the declarative pipeline DSL, the stage visualisation UI, and the graph analysis backend used by the Jenkinsfile."
+        },
+        {
+          "summary": "Install Docker Pipeline and Amazon ECR plugins",
+          "description": "Install docker-workflow (Docker Pipeline) and amazon-ecr. These plugins enable Docker build and push DSL steps within the Jenkinsfile and provide the ECR credential helper integration so the pipeline can authenticate to ECR using the instance IAM role without a credentials binding."
+        },
+        {
+          "summary": "Install GitHub Branch Source and GitHub Integration plugins",
+          "description": "Install github-branch-source and github. These plugins enable multibranch pipeline job discovery from the LoanFlow 360 GitHub repository, automatic branch and PR indexing, and bidirectional GitHub commit status posting from pipeline stages."
+        },
+        {
+          "summary": "Install JUnit, Build Timeout, and Timestamper plugins",
+          "description": "Install junit (test report publishing), build-timeout (abort hung builds after a configurable limit), and timestamper (prepend timestamps to console output). Configure a global build timeout default of 30 minutes in Manage Jenkins > System to prevent runaway builds from consuming agent resources indefinitely."
+        },
+        {
+          "summary": "Pin installed plugin versions and export the plugin list for repeatable provisioning",
+          "description": "After installation, use the Jenkins Script Console to export the installed plugin list in plugin-id:version format. Commit this list to the repository under <infra/jenkins/plugins.txt> so the Jenkins instance can be rebuilt from scratch using the Jenkins CLI install-plugin command and the pinned list."
+        }
+      ]
+    },
+    {
+      "summary": "Configure GitHub webhook and multibranch pipeline job",
+      "description": "Wire the LoanFlow 360 GitHub repository to Jenkins via a push webhook and create a multibranch pipeline job that automatically discovers branches containing a Jenkinsfile. The job is configured to scan for new branches on webhook receipt, map development/* and main branches to pipeline runs, and suppress builds on branches that carry no Jenkinsfile. GitHub commit status checks are posted for each pipeline run so pull request merge gates reflect the build outcome.",
+      "labels": ["jenkins", "github", "webhook", "multibranch-pipeline", "ci-cd"],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Push to any branch triggers a Jenkins pipeline run within 30 seconds",
+          "given": "the GitHub webhook is active and the multibranch pipeline job is configured",
+          "when": "a developer pushes a commit to any branch in the LoanFlow 360 repository",
+          "then": "Jenkins receives the webhook payload and starts the pipeline for that branch within 30 seconds of the push"
+        },
+        {
+          "scenario": "Branches without a Jenkinsfile are not built",
+          "given": "the multibranch pipeline job is configured with Jenkinsfile path set to Jenkinsfile",
+          "when": "a branch exists in the repository that contains no Jenkinsfile at the root",
+          "then": "Jenkins discovers the branch but does not create or run a pipeline build for it"
+        },
+        {
+          "scenario": "GitHub commit status reflects the pipeline result",
+          "given": "a push triggers a pipeline run",
+          "when": "the pipeline completes with a SUCCESS or FAILURE result",
+          "then": "the corresponding GitHub commit shows a green check or red cross status linked to the Jenkins build URL"
+        },
+        {
+          "scenario": "Deleted branches are removed from the multibranch job automatically",
+          "given": "the multibranch pipeline orphaned item strategy is set to discard after 1 day",
+          "when": "a branch is deleted from the GitHub repository",
+          "then": "the corresponding branch pipeline is removed from the Jenkins multibranch job within the next scan cycle"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add GitHub push webhook pointing to the Jenkins server",
+          "description": "In the LoanFlow 360 GitHub repository Settings > Webhooks, create a new webhook with Payload URL set to http://<jenkins-public-dns>/github-webhook/, Content type application/json, and the push event selected. Generate a webhook secret token and store it in Jenkins as a Secret Text credential named GITHUB_WEBHOOK_SECRET."
+        },
+        {
+          "summary": "Create multibranch pipeline job with GitHub Branch Source",
+          "description": "In Jenkins, create a new Multibranch Pipeline job named loanflow-360. Under Branch Sources, add a GitHub source pointing to the LoanFlow 360 repository. Set the GitHub credential to the GitHub App or personal access token credential. Set the Script Path to Jenkinsfile. Enable the 'Build strategies: Only build branches that contain a Jenkinsfile' behaviour."
+        },
+        {
+          "summary": "Configure branch discovery filters for development/* and main",
+          "description": "In the multibranch job Branch Sources configuration, add a Branch Filter using the filter-by-name-with-wildcards behaviour. Include patterns: main and development/*. This prevents Jenkins from building feature branches, hotfix branches, or any other unintended ref types."
+        },
+        {
+          "summary": "Set orphaned item and build discard strategies",
+          "description": "In the multibranch job, set the Orphaned Item Strategy to discard orphaned items after 1 day. Set the Build Discard policy to keep the last 20 builds per branch. This prevents storage exhaustion on the Jenkins EBS volume over time."
+        }
+      ]
+    },
+    {
+      "summary": "Configure Jenkins global environment variables and IAM instance profile binding",
+      "description": "Define the global environment variables that the Jenkinsfile reads at runtime for AWS region, ECR registry URI, and ECS cluster names. These values are configured in Manage Jenkins > System as global properties so they do not need to be hardcoded in the Jenkinsfile. Verify that the attached EC2 IAM instance profile is active and that AWS CLI commands issued from a Jenkins pipeline step resolve credentials through the instance metadata service (IMDS) without any stored AWS access keys.",
+      "labels": ["jenkins", "configuration", "aws", "iam", "environment-variables"],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Jenkinsfile reads AWS_REGION and ECR_REGISTRY without hardcoding",
+          "given": "global environment variables are defined in Jenkins system configuration",
+          "when": "a pipeline step references env.AWS_REGION or env.ECR_REGISTRY",
+          "then": "the correct values are resolved and logged in the build console output without the Jenkinsfile containing any hardcoded AWS account IDs or region strings"
+        },
+        {
+          "scenario": "AWS CLI on the Jenkins agent resolves credentials via IMDS",
+          "given": "the EC2 instance has the loanflow-jenkins-role instance profile attached",
+          "when": "a pipeline step runs aws sts get-caller-identity",
+          "then": "the output shows the loanflow-jenkins-role ARN and no AWS_ACCESS_KEY_ID environment variable is set"
+        },
+        {
+          "scenario": "ECS cluster name variables resolve to different values per branch environment",
+          "given": "ECS_CLUSTER_DEV and ECS_CLUSTER_PROD are defined as global environment variables",
+          "when": "the Jenkinsfile evaluates the branch name and selects the target cluster variable",
+          "then": "development/* branch builds reference ECS_CLUSTER_DEV and main branch builds reference ECS_CLUSTER_PROD"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Define global environment variables in Manage Jenkins > System",
+          "description": "Add the following key-value pairs under Global Properties > Environment Variables in the Jenkins system configuration:\n- AWS_REGION: the AWS region where ECR and ECS are provisioned\n- ECR_REGISTRY: the full ECR registry URI (account-id.dkr.ecr.region.amazonaws.com)\n- ECS_CLUSTER_DEV: the dev ECS cluster name\n- ECS_CLUSTER_PROD: the production ECS cluster name\n- LOANFLOW_ENV_DEV: dev\n- LOANFLOW_ENV_PROD: latest\nThese values are read from Parameter Store at /loanflow/iam and /loanflow/{env} paths provisioned by the infrastructure epic."
+        },
+        {
+          "summary": "Verify IAM instance profile is active and resolves via IMDS",
+          "description": "SSH into the Jenkins EC2 instance and run aws sts get-caller-identity to confirm the instance profile is active. Run curl http://169.254.169.254/latest/meta-data/iam/info to verify the instance metadata service returns the loanflow-jenkins-role ARN. Document the result as evidence that no stored credentials are needed."
+        },
+        {
+          "summary": "Install and configure the AWS CLI v2 on the Jenkins EC2 instance",
+          "description": "Install the AWS CLI v2 on the Jenkins EC2 instance following the official installation steps for the OS distribution. Verify the version with aws --version. Ensure the aws binary is on the PATH for the jenkins OS user so pipeline sh steps can invoke it without an absolute path."
+        }
+      ]
+    },
+    {
+      "summary": "Harden Jenkins master security and access controls",
+      "description": "Apply security hardening to the Jenkins master to prevent unauthorised access to the CI/CD system and its credentials. This includes disabling the Jenkins setup wizard after initial configuration, enforcing CSRF protection, restricting the Jenkins agent-to-master security model, disabling unauthenticated access, creating a dedicated admin user, and removing the default anonymous read permission. Security hardening is validated by attempting unauthenticated access and confirming it is denied.",
+      "labels": ["jenkins", "security", "hardening", "ci-cd", "access-control"],
+      "priority": "Medium",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Unauthenticated users cannot access any Jenkins page or API",
+          "given": "Jenkins security is configured with matrix-based or project-based authorization",
+          "when": "an HTTP request is made to any Jenkins URL without valid credentials",
+          "then": "Jenkins returns a 403 Forbidden response and does not expose any job, build, or system information"
+        },
+        {
+          "scenario": "CSRF protection rejects cross-site form submissions",
+          "given": "the CSRF crumb issuer is enabled in Jenkins security settings",
+          "when": "a POST request is made to a Jenkins API endpoint without a valid crumb token",
+          "then": "Jenkins returns a 403 Forbidden response with a CSRF error message"
+        },
+        {
+          "scenario": "Jenkins CLI over remoting is disabled",
+          "given": "the Jenkins security configuration has the CLI over remoting setting disabled",
+          "when": "a connection attempt is made using the Jenkins CLI jar over the remoting protocol",
+          "then": "the connection is refused; CLI access over JNLP or SSH agent protocol is unaffected"
+        },
+        {
+          "scenario": "Admin user credentials are stored in AWS Secrets Manager, not in a config file",
+          "given": "the Jenkins admin account is created",
+          "when": "Secrets Manager at /loanflow/jenkins/admin-credentials is inspected",
+          "then": "the admin username and password are retrievable from Secrets Manager and no plaintext credentials exist in committed configuration files"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Complete Jenkins setup wizard and disable it for subsequent restarts",
+          "description": "Perform the initial Jenkins setup by supplying the initialAdminPassword, creating the admin user, and setting the Jenkins URL. After setup, add JAVA_OPTS -Djenkins.install.runSetupWizard=false to the jenkins service configuration to prevent the wizard from reappearing after a restart."
+        },
+        {
+          "summary": "Enable CSRF protection and configure the default crumb issuer",
+          "description": "In Manage Jenkins > Security, ensure the CSRF Protection checkbox is enabled and the Default Crumb Issuer is selected. Verify that API calls issued without a valid crumb are rejected with 403. Document that Jenkins API clients must fetch a crumb token via /crumbIssuer/api/json before making POST requests."
+        },
+        {
+          "summary": "Configure matrix-based security to deny anonymous access and scope admin role",
+          "description": "In Manage Jenkins > Security, set the Authorization strategy to Matrix-based security. Remove all permissions from the Anonymous user row. Grant the admin user full permissions. Grant a read-only jenkins-viewer group Job/Read and View/Read permissions for audit access. This prevents unauthenticated API scraping of job names, build logs, or environment variables."
+        },
+        {
+          "summary": "Disable Jenkins CLI over remoting and restrict agent-to-master access",
+          "description": "In Manage Jenkins > Security, uncheck the 'Enable CLI over Remoting' option. Enable the Agent-to-master security subsystem and keep the default file access rules that prevent agents from reading or writing sensitive files in JENKINS_HOME. These settings limit the blast radius of a compromised build agent."
+        },
+        {
+          "summary": "Store Jenkins admin credentials in Secrets Manager and rotate the initial password",
+          "description": "After the admin user is created, store the username and password in Secrets Manager at /loanflow/jenkins/admin-credentials. Change the admin password from the initial setup value to a strong generated password. Delete the initialAdminPassword file from JENKINS_HOME. Set a calendar reminder to rotate the password every 90 days."
+        }
+      ]
+    }
+  ]
+}

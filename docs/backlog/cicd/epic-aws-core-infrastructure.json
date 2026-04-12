@@ -1,0 +1,256 @@
+{
+  "summary": "Provision AWS Core Infrastructure for ECS Deployment",
+  "description": "Provision all foundational AWS resources required to run LoanFlow 360 on ECS Fargate. This epic covers VPC networking, ECR image repositories, managed backing services (RDS MySQL, ElastiCache Redis, MSK Kafka, S3, DocumentDB), and IAM roles for Jenkins and ECS task execution. All resources are provisioned with environment isolation in mind: dev and production resources are segregated by naming convention and VPC configuration. No application code is deployed in this epic — the output is a fully wired, reachable infrastructure baseline that the CI/CD pipeline can target.",
+  "labels": ["aws", "infrastructure", "ecs", "ecr", "networking", "iam", "devops"],
+  "priority": "High",
+  "userType": "operations engineer",
+  "functionality": "provision the complete AWS resource set required to host all LoanFlow 360 microservices on ECS Fargate with managed backing services and least-privilege IAM access",
+  "benefit": "establish a reproducible, environment-isolated infrastructure baseline that the Jenkins pipeline can deploy into without manual AWS console intervention",
+  "stories": [
+    {
+      "summary": "Provision VPC, subnets, gateways, and security groups",
+      "description": "Create the network foundation for all LoanFlow 360 ECS workloads. This includes a dedicated VPC with public and private subnets across two availability zones, an internet gateway for the public tier, a NAT gateway for outbound access from private subnets, route tables for each subnet tier, and security groups scoped to the ALB, ECS tasks, RDS, ElastiCache, MSK, and DocumentDB. All ECS tasks run in private subnets; only the ALB is placed in public subnets.\n\nResource naming convention: loanflow-{env}-{resource} (e.g. loanflow-dev-vpc, loanflow-prod-ecs-sg)",
+      "labels": ["aws", "vpc", "networking", "security-groups", "infrastructure"],
+      "priority": "High",
+      "storyPoints": 8,
+      "acceptanceCriteria": [
+        {
+          "scenario": "ECS tasks in private subnets reach the internet via NAT",
+          "given": "an ECS task is running in a private subnet",
+          "when": "the task makes an outbound HTTPS request (e.g. to pull from ECR or call Secrets Manager)",
+          "then": "the request routes through the NAT gateway and succeeds without assigning a public IP to the task"
+        },
+        {
+          "scenario": "Security groups allow only required inbound traffic per resource tier",
+          "given": "the ECS task security group is applied to a running service",
+          "when": "a connection attempt arrives from outside the VPC directly on a service port",
+          "then": "the connection is rejected; only traffic originating from the ALB security group is permitted on the service port"
+        },
+        {
+          "scenario": "RDS and ElastiCache are reachable only from ECS task security group",
+          "given": "the RDS security group allows inbound on port 3306 only from the ECS task security group",
+          "when": "an ECS task connects to RDS",
+          "then": "the connection succeeds; a connection attempt from outside the ECS task security group is denied"
+        },
+        {
+          "scenario": "Public and private subnets exist across two AZs",
+          "given": "the VPC provisioning is complete",
+          "when": "the subnet list is inspected",
+          "then": "two public subnets and two private subnets exist, each in a different availability zone within the same region"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create VPC with DNS hostname and resolution enabled",
+          "description": "Provision a VPC with a /16 CIDR block (e.g. 10.0.0.0/16) with enableDnsHostnames and enableDnsSupport set to true. These settings are required for ECS tasks to resolve ECR and Secrets Manager endpoints and for RDS hostname resolution."
+        },
+        {
+          "summary": "Create public and private subnets across two availability zones",
+          "description": "Create two public subnets (/24 CIDRs) and two private subnets (/24 CIDRs), each in a distinct AZ. Tag public subnets with kubernetes.io/role/elb and private subnets with kubernetes.io/role/internal-elb for forward compatibility. Associate public subnets with the internet-facing route table."
+        },
+        {
+          "summary": "Provision internet gateway, NAT gateway, and route tables",
+          "description": "Attach an internet gateway to the VPC. Provision a NAT gateway in one public subnet with an associated Elastic IP. Create a public route table with a 0.0.0.0/0 route to the internet gateway and a private route table with a 0.0.0.0/0 route to the NAT gateway. Associate subnets with their respective route tables."
+        },
+        {
+          "summary": "Define security groups for ALB, ECS tasks, RDS, ElastiCache, MSK, and DocumentDB",
+          "description": "Create the following security groups:\n- loanflow-{env}-alb-sg: inbound 80/443 from 0.0.0.0/0\n- loanflow-{env}-ecs-sg: inbound on service ports from alb-sg only\n- loanflow-{env}-rds-sg: inbound 3306 from ecs-sg only\n- loanflow-{env}-redis-sg: inbound 6379 from ecs-sg only\n- loanflow-{env}-msk-sg: inbound 9092 from ecs-sg only\n- loanflow-{env}-docdb-sg: inbound 27017 from ecs-sg only\nAll security groups allow all outbound traffic."
+        }
+      ]
+    },
+    {
+      "summary": "Provision ECR repositories for all six microservices",
+      "description": "Create one Amazon ECR repository per LoanFlow 360 microservice with image tag immutability and vulnerability scanning enabled. Repositories are used by the Jenkins pipeline to push and pull versioned service images during CI/CD runs. A lifecycle policy is applied to each repository to expire untagged images after 7 days and retain a maximum of 20 tagged images, preventing unbounded storage growth.\n\nRepositories to create:\n- loanflow/api-gateway\n- loanflow/identity-service\n- loanflow/loan-service\n- loanflow/document-service\n- loanflow/underwriting-service\n- loanflow/notification-service",
+      "labels": ["aws", "ecr", "docker", "infrastructure"],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "One ECR repository exists for each of the six microservices",
+          "given": "the ECR provisioning is complete",
+          "when": "the ECR repository list is inspected in the AWS console or via CLI",
+          "then": "exactly six repositories exist under the loanflow/ prefix, one per service"
+        },
+        {
+          "scenario": "Image tag immutability prevents overwriting an existing tag",
+          "given": "an image with tag abc1234 has been pushed to a repository",
+          "when": "a second push attempts to overwrite the same tag abc1234",
+          "then": "ECR rejects the push with an ImageTagAlreadyExistsException"
+        },
+        {
+          "scenario": "Lifecycle policy expires untagged images after 7 days",
+          "given": "an untagged image has existed in a repository for 8 days",
+          "when": "the ECR lifecycle policy evaluates the repository",
+          "then": "the untagged image is deleted and no longer appears in the repository image list"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create six ECR repositories with tag immutability and scan-on-push enabled",
+          "description": "Provision repositories for api-gateway, identity-service, loan-service, document-service, underwriting-service, and notification-service under the loanflow/ namespace. Set imageTagMutability to IMMUTABLE and imageScanningConfiguration scanOnPush to true on each repository."
+        },
+        {
+          "summary": "Apply ECR lifecycle policy to each repository",
+          "description": "Attach a lifecycle policy to each repository with two rules: (1) expire untagged images with countType sinceImagePushed greater than 7 days, and (2) retain only the most recent 20 tagged images. Apply policies via the AWS CLI or infrastructure-as-code to ensure repeatability."
+        },
+        {
+          "summary": "Output ECR repository URIs for use in Jenkins environment variables",
+          "description": "After provisioning, document the full ECR registry URI (account-id.dkr.ecr.region.amazonaws.com) and repository names so they can be configured as Jenkins global environment variables (ECR_REGISTRY, AWS_REGION) referenced by the Jenkinsfile."
+        }
+      ]
+    },
+    {
+      "summary": "Provision RDS MySQL instances and ElastiCache Redis cluster",
+      "description": "Provision the relational and caching backing services required by the transactional LoanFlow 360 microservices. Four of the six services (identity-service, loan-service, document-service, underwriting-service) use MySQL for persistence. The api-gateway and loan-service use Redis for distributed rate limiting and application summary caching respectively.\n\nRDS instances are placed in private subnets with Multi-AZ disabled for dev and enabled for production. ElastiCache Redis is deployed as a single-node cluster for dev and a replication group for production. All credentials are stored in AWS Secrets Manager at provisioning time.",
+      "labels": ["aws", "rds", "mysql", "redis", "elasticache", "infrastructure"],
+      "priority": "High",
+      "storyPoints": 8,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Each transactional service has a dedicated RDS database",
+          "given": "RDS provisioning is complete",
+          "when": "the RDS instance list is inspected",
+          "then": "four RDS MySQL instances exist, one each for identity-service, loan-service, document-service, and underwriting-service, each in the private subnet group"
+        },
+        {
+          "scenario": "RDS instances are not publicly accessible",
+          "given": "an RDS instance is running",
+          "when": "a connection attempt is made from outside the VPC on port 3306",
+          "then": "the connection is refused; the instance endpoint is not resolvable from the public internet"
+        },
+        {
+          "scenario": "ElastiCache Redis cluster endpoint is reachable from ECS tasks",
+          "given": "an ECS task running in the private subnet attempts to connect to Redis on port 6379",
+          "when": "the connection is made using the ElastiCache primary endpoint",
+          "then": "the connection succeeds and a PING returns PONG"
+        },
+        {
+          "scenario": "RDS and Redis credentials are stored in Secrets Manager at creation time",
+          "given": "the RDS and ElastiCache provisioning scripts complete",
+          "when": "Secrets Manager is inspected",
+          "then": "secrets exist at /loanflow/{env}/{service-name}/db-password and /loanflow/{env}/redis-auth-token with the generated credentials"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create RDS subnet group covering private subnets in both AZs",
+          "description": "Create a DB subnet group named loanflow-{env}-db-subnet-group using the two private subnets. This subnet group is referenced by all four RDS instances to ensure instances are placed in the private network tier."
+        },
+        {
+          "summary": "Provision four RDS MySQL 8.0 instances, one per transactional service",
+          "description": "Create RDS instances for identity-service, loan-service, document-service, and underwriting-service. Use db.t3.micro for dev and db.t3.small for production. Set MultiAZ to false for dev and true for production. Attach the rds-sg security group. Enable automated backups with a 7-day retention window. Set the master username and generate a password, storing it in Secrets Manager at /loanflow/{env}/{service-name}/db-password."
+        },
+        {
+          "summary": "Provision ElastiCache Redis 7.x cluster in private subnets",
+          "description": "Create an ElastiCache subnet group using the private subnets. Provision a Redis cluster (cache.t3.micro for dev, cache.t3.small for production) with in-transit encryption enabled and an auth token stored in Secrets Manager at /loanflow/{env}/redis-auth-token. Attach the redis-sg security group."
+        },
+        {
+          "summary": "Document RDS endpoints and Redis primary endpoint for Spring Boot config",
+          "description": "After provisioning, record each RDS instance endpoint hostname and the ElastiCache primary endpoint. These values are stored in AWS Systems Manager Parameter Store at /loanflow/{env}/{service-name}/db-host and /loanflow/{env}/redis-host so they can be injected as environment variables in ECS task definitions without hardcoding in application config files."
+        }
+      ]
+    },
+    {
+      "summary": "Provision MSK Kafka cluster, S3 document bucket, and DocumentDB cluster",
+      "description": "Provision the messaging, object storage, and document-oriented backing services used by the event-driven microservices in LoanFlow 360. MSK provides the Kafka broker for the loan.application.submitted, loan.document.verified, loan.underwriting.completed, and loan.status.updated topics. S3 stores document files uploaded by the document-service. DocumentDB hosts the append-heavy audit events and notifications consumed by the notification-service.\n\nAll three resources are placed in private subnets. MSK uses SASL/SCRAM authentication; S3 uses server-side encryption; DocumentDB uses TLS with credentials in Secrets Manager.",
+      "labels": ["aws", "msk", "kafka", "s3", "documentdb", "mongodb", "infrastructure"],
+      "priority": "High",
+      "storyPoints": 8,
+      "acceptanceCriteria": [
+        {
+          "scenario": "MSK cluster brokers are reachable from ECS tasks on port 9092",
+          "given": "an ECS task running in the private subnet attempts to connect to the MSK bootstrap broker",
+          "when": "a Kafka producer sends a test message to the loan.application.submitted topic",
+          "then": "the message is acknowledged without connection errors"
+        },
+        {
+          "scenario": "S3 bucket blocks all public access",
+          "given": "the S3 bucket is provisioned",
+          "when": "a public access check is performed via the AWS console or CLI",
+          "then": "BlockPublicAcls, IgnorePublicAcls, BlockPublicPolicy, and RestrictPublicBuckets are all set to true"
+        },
+        {
+          "scenario": "DocumentDB cluster is reachable from ECS tasks on port 27017",
+          "given": "an ECS task running in the private subnet connects to the DocumentDB cluster endpoint",
+          "when": "a MongoDB-compatible PING command is sent",
+          "then": "the cluster responds successfully over TLS"
+        },
+        {
+          "scenario": "MSK SASL credentials and DocumentDB password are stored in Secrets Manager",
+          "given": "MSK and DocumentDB provisioning is complete",
+          "when": "Secrets Manager is inspected",
+          "then": "secrets exist at /loanflow/{env}/msk-sasl-credentials and /loanflow/{env}/docdb-password"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Provision MSK Kafka cluster with two brokers across two AZs",
+          "description": "Create an MSK cluster named loanflow-{env}-kafka using Kafka 3.x with two broker nodes (kafka.t3.small for dev, kafka.m5.large for production), one per AZ in the private subnets. Enable SASL/SCRAM authentication and in-transit encryption (TLS). Store SASL credentials in Secrets Manager at /loanflow/{env}/msk-sasl-credentials. Attach the msk-sg security group."
+        },
+        {
+          "summary": "Create Kafka topics for the four LoanFlow 360 event streams",
+          "description": "After the MSK cluster reaches ACTIVE state, create the following topics using the Kafka CLI or MSK API: loan.application.submitted (3 partitions, replication factor 2), loan.document.verified (3 partitions, RF 2), loan.underwriting.completed (3 partitions, RF 2), loan.status.updated (3 partitions, RF 2)."
+        },
+        {
+          "summary": "Provision S3 bucket for document-service with versioning and SSE-S3 encryption",
+          "description": "Create an S3 bucket named loanflow-{env}-documents with versioning enabled, server-side encryption set to SSE-S3, and all public access blocked. Add a lifecycle rule to transition objects older than 90 days to S3 Infrequent Access storage class. Record the bucket name in Parameter Store at /loanflow/{env}/s3-documents-bucket."
+        },
+        {
+          "summary": "Provision DocumentDB 5.0 cluster for notification-service",
+          "description": "Create a DocumentDB subnet group using the private subnets. Provision a DocumentDB cluster (db.t3.medium) with TLS enabled, automated backups with a 7-day retention, and the master password stored in Secrets Manager at /loanflow/{env}/docdb-password. Attach the docdb-sg security group. Record the cluster endpoint in Parameter Store at /loanflow/{env}/docdb-host."
+        }
+      ]
+    },
+    {
+      "summary": "Configure IAM roles for Jenkins EC2 and ECS task execution",
+      "description": "Define and attach the IAM roles required for the Jenkins EC2 instance to perform ECR pushes and ECS deployments, and for ECS task execution to pull images from ECR and inject secrets from Secrets Manager at container startup. Both roles follow least-privilege principles: the Jenkins role grants only the actions needed for the CI/CD pipeline; the ECS task execution role grants only the actions needed to start and run a container. Application-level AWS access (e.g. S3 reads from the document-service) is handled by a separate ECS task role, which is out of scope for this story.",
+      "labels": ["aws", "iam", "security", "jenkins", "ecs", "infrastructure"],
+      "priority": "High",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Jenkins pushes images and triggers ECS deployments without stored AWS keys",
+          "given": "the Jenkins EC2 instance has the Jenkins IAM role attached via instance profile",
+          "when": "the pipeline runs ECR login, docker push, and aws ecs update-service",
+          "then": "all three operations succeed using the instance metadata service and no AWS access key IDs are stored in Jenkins credential store"
+        },
+        {
+          "scenario": "Jenkins IAM role is denied access to resources outside its policy",
+          "given": "the Jenkins IAM role policy is evaluated",
+          "when": "the role attempts to call ec2:TerminateInstances or s3:DeleteBucket",
+          "then": "the API call is denied with an AccessDenied error"
+        },
+        {
+          "scenario": "ECS task execution role successfully pulls an image from ECR at task start",
+          "given": "an ECS task definition references the task execution role ARN",
+          "when": "ECS starts a new task",
+          "then": "the agent pulls the container image from ECR without error using the execution role"
+        },
+        {
+          "scenario": "ECS task execution role injects Secrets Manager secrets as environment variables",
+          "given": "a task definition secrets block references a Secrets Manager ARN",
+          "when": "the task starts",
+          "then": "the container receives the secret value as an environment variable and no plaintext secret appears in the task definition JSON"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create Jenkins EC2 IAM role with ECR push and ECS deploy permissions",
+          "description": "Create an IAM role named loanflow-jenkins-role with an EC2 trust policy. Attach an inline policy granting: ecr:GetAuthorizationToken, ecr:BatchCheckLayerAvailability, ecr:PutImage, ecr:InitiateLayerUpload, ecr:UploadLayerPart, ecr:CompleteLayerUpload on the six loanflow/* ECR repositories; ecs:UpdateService and ecs:DescribeServices on the dev and production ECS clusters; and secretsmanager:GetSecretValue scoped to /loanflow/jenkins/* secrets only."
+        },
+        {
+          "summary": "Attach Jenkins IAM role to the Jenkins EC2 instance via instance profile",
+          "description": "Create an IAM instance profile wrapping the loanflow-jenkins-role and associate it with the Jenkins EC2 instance. Verify the role is active by running aws sts get-caller-identity on the instance and confirming the returned ARN matches loanflow-jenkins-role."
+        },
+        {
+          "summary": "Create ECS task execution role with ECR pull and Secrets Manager read permissions",
+          "description": "Create an IAM role named loanflow-ecs-execution-role with an ECS tasks trust policy (ecs-tasks.amazonaws.com). Attach the AWS managed policy AmazonECSTaskExecutionRolePolicy for ECR pull and CloudWatch log delivery. Add an inline policy granting secretsmanager:GetSecretValue scoped to ARNs matching arn:aws:secretsmanager:*:*:secret:/loanflow/* to allow secrets injection at task startup."
+        },
+        {
+          "summary": "Document IAM role ARNs for use in ECS task definitions and Jenkinsfile",
+          "description": "After both roles are created, record the full IAM role ARNs in a shared configuration reference. The ECS task execution role ARN is referenced in the executionRoleArn field of every ECS task definition. The Jenkins role ARN is used to verify the instance profile attachment. Store both ARNs in Parameter Store at /loanflow/iam/jenkins-role-arn and /loanflow/iam/ecs-execution-role-arn."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,252 @@
+{
+  "summary": "Root Jenkinsfile — Multi-Service Change-Scoped CI/CD Pipeline",
+  "description": "Implement a single declarative Jenkinsfile at the repository root that drives the full build-test-package-push-deploy lifecycle for all LoanFlow 360 backend microservices. The pipeline detects which service directories have changed relative to the previous commit, scopes Maven build and unit test execution to only those services, builds container images via the Spring Boot Maven Plugin (spring-boot:build-image), pushes to AWS ECR, and triggers ECS rolling deployments on the target cluster. The loanflow-common shared library is reinstalled into the local Maven repository at pipeline start whenever its source changes. Branch logic maps development/* branches to the dev ECS cluster and main to the production cluster.",
+  "labels": ["ci-cd", "jenkins", "pipeline", "maven", "docker", "ecr", "ecs", "devops"],
+  "priority": "High",
+  "userType": "operations engineer",
+  "functionality": "define a single versioned Jenkinsfile that automatically scopes builds to changed services, enforces test gates, produces OCI-compliant images via the Spring Boot Maven Plugin, and rolls out only the affected services to ECS",
+  "benefit": "eliminate full-monorepo rebuilds on every push, enforce quality gates before any image is produced, and deliver a reproducible deployment trail from commit SHA to running ECS task",
+  "stories": [
+    {
+      "summary": "Implement per-service change detection in Jenkinsfile",
+      "description": "Add a Detect Changes stage to the Jenkinsfile that uses git diff to inspect which service directories were modified by the triggering commit. The stage sets per-service boolean flags that downstream stages read to decide whether to execute. If loanflow-common or the root pom.xml is touched, all services are flagged as changed. The affected service list is surfaced in the build log for traceability.\n\nServices under detection scope:\n- <backend/loanflow-common>\n- <backend/api-gateway>\n- <backend/identity-service>\n- <backend/loan-service>\n- <backend/document-service>\n- <backend/underwriting-service>\n- <backend/notification-service>",
+      "labels": ["ci-cd", "jenkins", "change-detection", "pipeline"],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Only the modified service is flagged for build",
+          "given": "a commit touches only files under backend/loan-service",
+          "when": "the Detect Changes stage runs",
+          "then": "only the LOAN_SERVICE_CHANGED flag is set to true; all other service flags remain false"
+        },
+        {
+          "scenario": "All services flagged when shared library changes",
+          "given": "a commit modifies a file under backend/loanflow-common",
+          "when": "the Detect Changes stage runs",
+          "then": "every per-service changed flag is set to true regardless of which other directories were touched"
+        },
+        {
+          "scenario": "Affected service list is logged",
+          "given": "the Detect Changes stage completes",
+          "when": "the pipeline build log is inspected",
+          "then": "a line lists the names of all services flagged for rebuild in that run"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Write git diff change detection script block in Jenkinsfile",
+          "description": "Add a script block in the Detect Changes stage that runs git diff --name-only HEAD~1 HEAD and compares output paths against per-service directory prefixes. Assign the result to environment-scoped boolean variables (e.g. CHANGED_LOAN_SERVICE, CHANGED_IDENTITY_SERVICE) that subsequent when conditions reference."
+        },
+        {
+          "summary": "Add shared library change check that forces a full rebuild",
+          "description": "After per-service path matching, add a check for changes under backend/loanflow-common and the root pom.xml. If either matches, override all per-service flags to true. Log 'Full rebuild triggered by shared library change' to the console output."
+        },
+        {
+          "summary": "Print affected service summary to build log",
+          "description": "After flag evaluation, echo a formatted summary line to stdout that lists the service names where the changed flag is true. This aids post-build auditing and supports incident reviews when correlating a bad deployment with its triggering commit."
+        }
+      ]
+    },
+    {
+      "summary": "Implement loanflow-common install and per-service Maven build and unit test stages",
+      "description": "Add a parallel Build & Test stage block that executes Maven for each service whose changed flag is set. If loanflow-common is flagged, install it into the local repository first using mvn clean install -DskipTests before any dependent service builds start. Each service build runs mvn clean verify using the service's own Maven wrapper. A test failure in any parallel branch marks the overall build as FAILED and prevents downstream Docker and deploy stages from executing.\n\nServices built in parallel when flagged:\n- <backend/api-gateway>\n- <backend/identity-service>\n- <backend/loan-service>\n- <backend/document-service>\n- <backend/underwriting-service>\n- <backend/notification-service>",
+      "labels": ["ci-cd", "jenkins", "maven", "unit-tests", "pipeline"],
+      "priority": "High",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "loanflow-common is installed before any dependent service builds",
+          "given": "loanflow-common is flagged as changed",
+          "when": "the Build & Test stage runs",
+          "then": "mvn clean install -DskipTests executes in backend/loanflow-common before any service parallel branch starts"
+        },
+        {
+          "scenario": "Only flagged services execute Maven builds",
+          "given": "only identity-service and loan-service are flagged",
+          "when": "the Build & Test stage runs",
+          "then": "only those two service Maven builds execute; the remaining four services produce a skipped log entry"
+        },
+        {
+          "scenario": "Unit test failure halts pipeline before Docker stage",
+          "given": "a unit test in identity-service fails",
+          "when": "the Build & Test stage runs",
+          "then": "the pipeline is marked FAILED, the Docker Build stage is not entered, and the failure is reported to the GitHub commit status check"
+        },
+        {
+          "scenario": "Test reports are published after each service build",
+          "given": "a service Maven build completes with test results",
+          "when": "the Build & Test stage finishes",
+          "then": "JUnit XML reports from target/surefire-reports are published to Jenkins so failed tests are visible in the build UI"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add sequential loanflow-common install step before parallel service stage",
+          "description": "In the Jenkinsfile, add a dedicated stage or pre-step that runs cd backend/loanflow-common && ./mvnw clean install -DskipTests when the CHANGED_LOANFLOW_COMMON flag is true. This stage must complete before the parallel Build & Test block starts."
+        },
+        {
+          "summary": "Write parallel Maven build and test blocks for all six services",
+          "description": "Define a parallel stage with one branch per service. Each branch is gated by a when { expression { return env.CHANGED_<SERVICE> == 'true' } } condition. The build command is cd backend/<service-name> && ./mvnw clean verify. Branches where the condition is false echo 'Skipped — no changes detected' and return."
+        },
+        {
+          "summary": "Configure JUnit test report publishing for each service branch",
+          "description": "After each Maven build command, add a post { always { junit 'backend/<service-name>/target/surefire-reports/**/*.xml' } } block so Jenkins captures and displays test results regardless of pass or fail. This is required for the pipeline to surface per-test failure details in the Jenkins UI."
+        },
+        {
+          "summary": "Set GitHub commit status to PENDING at build start and FAILURE on test stage exit",
+          "description": "Use the GitHub Steps plugin to post a pending status at the start of the Build & Test stage and a failure status with a link to the Jenkins build log if any parallel branch exits with a non-zero Maven return code."
+        }
+      ]
+    },
+    {
+      "summary": "Build per-service Docker images using Spring Boot Maven Plugin",
+      "description": "Add a Docker Build stage that uses the Spring Boot Maven Plugin goal spring-boot:build-image to produce an OCI-compliant container image for each service that passed its Maven build. Images are tagged with the short Git commit SHA (first 7 characters) and an environment label (dev for development/* branches, latest for main). The plugin eliminates the need for a Dockerfile by using Cloud Native Buildpacks. This stage only runs if the Build & Test stage succeeded.\n\nImage naming convention: <ECR_REGISTRY>/<service-name>:<GIT_SHA>",
+      "labels": ["ci-cd", "jenkins", "docker", "spring-boot-maven-plugin", "buildpacks"],
+      "priority": "High",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Image is produced using Spring Boot Maven Plugin without a Dockerfile",
+          "given": "a service passed its Maven build and test stage",
+          "when": "the Docker Build stage runs for that service",
+          "then": "mvn spring-boot:build-image executes and produces a local OCI image with no Dockerfile present in the service directory"
+        },
+        {
+          "scenario": "Image is tagged with the short commit SHA",
+          "given": "the pipeline is triggered by commit abc1234def",
+          "when": "the Docker Build stage completes",
+          "then": "the produced image carries the tag abc1234 and the environment tag (dev or latest)"
+        },
+        {
+          "scenario": "Docker Build stage is skipped for services not built in the prior stage",
+          "given": "only loan-service was flagged and passed its Maven build",
+          "when": "the Docker Build stage runs",
+          "then": "only the loan-service image is built; no spring-boot:build-image invocation occurs for the other five services"
+        },
+        {
+          "scenario": "Plugin image name is set to the ECR registry URI at build time",
+          "given": "the ECR registry URI is defined as a pipeline environment variable",
+          "when": "spring-boot:build-image executes",
+          "then": "the resulting image name matches <ECR_REGISTRY>/<service-name>:<GIT_SHA> so it can be pushed directly without a docker tag step"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Configure spring-boot-maven-plugin in each service pom.xml for image naming",
+          "description": "In each backend service pom.xml, add or update the spring-boot-maven-plugin configuration block to set the image name property to the ECR registry URI and service name using a Maven property that the Jenkinsfile overrides at build time via -Dspring-boot.build-image.imageName=<value>."
+        },
+        {
+          "summary": "Add Docker Build stage to Jenkinsfile with per-service conditional execution",
+          "description": "Add a Docker Build stage after the Build & Test stage. Use the same per-service changed flag conditions. For each flagged service, run cd backend/<service-name> && ./mvnw spring-boot:build-image -Dspring-boot.build-image.imageName=${ECR_REGISTRY}/<service-name>:${GIT_SHA}."
+        },
+        {
+          "summary": "Derive GIT_SHA and ENV_TAG environment variables at pipeline start",
+          "description": "At the top of the Jenkinsfile environment block, set GIT_SHA = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim() and ENV_TAG = (env.BRANCH_NAME ==~ /^main$/) ? 'latest' : 'dev'. These variables are referenced in the image name during Docker Build and ECR Push stages."
+        },
+        {
+          "summary": "Ensure Docker daemon is accessible from Jenkins agent and buildpacks cache is configured",
+          "description": "Verify the Jenkins agent has the Docker socket mounted or Docker-in-Docker configured. Set DOCKER_BUILDKIT=1 and configure a persistent Paketo buildpack cache volume on the agent to accelerate repeated image builds."
+        }
+      ]
+    },
+    {
+      "summary": "Authenticate to ECR and push service images",
+      "description": "Add an ECR Push stage that authenticates to AWS ECR using the Jenkins EC2 instance IAM role (no stored credentials), then pushes each newly built image with both the commit SHA tag and the environment tag. If a service was not rebuilt in the current run its push step is skipped. The ECR registry URI and AWS region are read from pipeline environment variables.",
+      "labels": ["ci-cd", "jenkins", "ecr", "docker", "aws"],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "ECR login succeeds using instance IAM role without stored secrets",
+          "given": "the Jenkins agent EC2 instance has an IAM role with ECR push permissions attached",
+          "when": "the ECR Push stage runs the login command",
+          "then": "aws ecr get-login-password authenticates successfully and no AWS access keys are stored in Jenkins credentials"
+        },
+        {
+          "scenario": "Both SHA tag and environment tag are pushed for each rebuilt service",
+          "given": "loan-service was rebuilt and tagged as <ECR>/<service>:abc1234",
+          "when": "the ECR Push stage runs",
+          "then": "both the abc1234 tag and the dev (or latest) tag are visible in the ECR repository after the stage completes"
+        },
+        {
+          "scenario": "Services not rebuilt in this run are not re-pushed",
+          "given": "only identity-service was rebuilt",
+          "when": "the ECR Push stage runs",
+          "then": "only the identity-service ECR push commands execute; no docker push command is issued for the other five services"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add ECR login step to Jenkinsfile using AWS CLI and instance profile",
+          "description": "Add a step that runs: aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}. This must execute before any docker push command in the stage."
+        },
+        {
+          "summary": "Add per-service docker push steps with SHA and environment tags",
+          "description": "For each service whose changed flag is true, push the SHA-tagged image then tag it with ENV_TAG and push again: docker push ${ECR_REGISTRY}/<service>:${GIT_SHA} followed by docker tag and docker push for ${ENV_TAG}. Gate each block on the same per-service flag used in prior stages."
+        },
+        {
+          "summary": "Define ECR_REGISTRY and AWS_REGION as pipeline environment variables",
+          "description": "Add ECR_REGISTRY and AWS_REGION to the Jenkinsfile environment block. Values should be sourced from Jenkins global environment variables or injected via the withEnv step so the Jenkinsfile itself contains no account IDs or region strings."
+        }
+      ]
+    },
+    {
+      "summary": "Trigger ECS rolling deployments per changed service with stability wait and rollback",
+      "description": "Add an ECS Deploy stage that calls aws ecs update-service --force-new-deployment for each service pushed to ECR in the current run. The target ECS cluster is selected based on branch name: development/* branches deploy to the dev cluster, main deploys to the production cluster. After each update-service call, the stage waits for the service to reach stable state using aws ecs wait services-stable. If the wait times out or the service fails health checks, the stage executes an automated rollback by re-deploying the previous task definition revision and marks the build as FAILED.",
+      "labels": ["ci-cd", "jenkins", "ecs", "aws", "deployment", "rollback"],
+      "priority": "High",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "development/* branch deploys to the dev ECS cluster",
+          "given": "the pipeline runs on a development/* branch",
+          "when": "the ECS Deploy stage executes",
+          "then": "aws ecs update-service targets the dev cluster ARN; the production cluster is not called"
+        },
+        {
+          "scenario": "main branch deploys to the production ECS cluster",
+          "given": "the pipeline runs on the main branch",
+          "when": "the ECS Deploy stage executes",
+          "then": "aws ecs update-service targets the production cluster ARN"
+        },
+        {
+          "scenario": "Stage waits for ECS service stability before marking success",
+          "given": "update-service is called for loan-service",
+          "when": "the ECS Deploy stage runs",
+          "then": "aws ecs wait services-stable is called immediately after update-service and the stage does not proceed until the service reaches steady state"
+        },
+        {
+          "scenario": "Automated rollback executes when deployment fails health checks",
+          "given": "the new loan-service task revision fails ALB health checks and does not reach stable state within the timeout",
+          "when": "aws ecs wait services-stable times out",
+          "then": "the Jenkinsfile catch block retrieves the previous task definition ARN, calls update-service with it to restore the prior revision, and marks the overall build as FAILED"
+        },
+        {
+          "scenario": "Only services deployed in the current run are updated in ECS",
+          "given": "only notification-service was rebuilt and pushed in this run",
+          "when": "the ECS Deploy stage executes",
+          "then": "only the notification-service ECS service receives an update-service call; all other services are unchanged"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add ECS cluster selection logic to Jenkinsfile based on branch name",
+          "description": "In the ECS Deploy stage environment block, set ECS_CLUSTER to the dev cluster name when BRANCH_NAME matches development/*, and to the production cluster name when BRANCH_NAME is main. Derive these values from Jenkins environment variables so no cluster names are hardcoded in the Jenkinsfile."
+        },
+        {
+          "summary": "Implement per-service update-service and services-stable wait steps",
+          "description": "For each service whose changed flag is true, run aws ecs update-service --cluster ${ECS_CLUSTER} --service <service-name> --force-new-deployment followed by aws ecs wait services-stable --cluster ${ECS_CLUSTER} --services <service-name>. Gate each block on the same changed flag checked in prior stages."
+        },
+        {
+          "summary": "Wrap ECS deploy steps in try-catch to execute rollback on failure",
+          "description": "Wrap the update-service + wait block for each service in a try-catch. In the catch block, retrieve the currently active task definition ARN using aws ecs describe-services, derive the previous revision by decrementing the revision number, then call aws ecs update-service with the prior task definition ARN. After rollback, call error() to fail the build."
+        },
+        {
+          "summary": "Post GitHub commit status with deployed image SHA and cluster target on success",
+          "description": "On successful completion of the ECS Deploy stage, use the GitHub Steps plugin to post a success status to the triggering commit that includes the deployed image SHA tag and the target cluster name. This provides a direct audit link from the GitHub commit to the deployed artifact."
+        }
+      ]
+    }
+  ]
+}
