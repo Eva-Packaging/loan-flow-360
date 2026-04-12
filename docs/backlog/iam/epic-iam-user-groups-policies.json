@@ -1,0 +1,299 @@
+{
+  "summary": "Configure IAM User Groups and Policies for All LoanFlow 360 Team Roles",
+  "description": "Design and implement the complete IAM group and policy model for the LoanFlow 360 AWS account. Six user groups are defined — admin, developer, devops, qa, data-admin, and auditor — each with a combination of base policies shared across all groups and granular policies scoped to the job function. Base policies (MFA enforcement, self-service IAM, CloudWatch Logs read) are defined once and attached to every group. Granular policies use resource-level conditions to scope permissions to loanflow-* resource names and /loanflow/* path prefixes, preventing any group from accessing resources outside the project. The devops group policies are defined in a companion epic (epic-iam-devops-access) and are not duplicated here.\n\nGroup summary:\n- loanflow-admin: full account administration and billing\n- loanflow-developer: application development — logs, ECR pull, describe infra, dev secrets read\n- loanflow-devops: infrastructure provisioning and CI/CD (defined separately)\n- loanflow-qa: test environment deployments, log access, document storage read\n- loanflow-data-admin: database, cache, broker, and document store administration\n- loanflow-auditor: read-only compliance and security review across IAM, CloudTrail, Config, and CloudWatch",
+  "labels": ["iam", "aws", "security", "access-control", "groups", "policies", "least-privilege"],
+  "priority": "High",
+  "userType": "AWS system administrator",
+  "functionality": "define and attach a complete set of IAM groups and policies that grant every LoanFlow 360 team role the minimum permissions required for their job function, with shared base policies eliminating duplication and granular policies enforcing resource-level isolation",
+  "benefit": "prevent unauthorised resource access across team roles, provide a clear and auditable permission model that can be reviewed by security teams, and ensure no team member can escalate privileges or access data outside their defined scope",
+  "stories": [
+    {
+      "summary": "Create all IAM groups and implement base policies shared across every group",
+      "description": "Provision the six loanflow- IAM groups and implement the three base policies that are attached to every group regardless of role: MFA enforcement (denies all actions when MFA is not present), self-service IAM (allows each user to manage their own password, MFA device, and access keys without admin intervention), and ECS describe read-only (allows any team member to inspect ECS cluster, service, and task state for debugging without the ability to modify anything). These policies are defined once and reused — a change to MFA enforcement propagates to all groups through the single shared policy attachment.\n\nBase policies:\n- LoanFlowMFAEnforcement (all groups)\n- LoanFlowSelfServiceIAM (all groups)\n- LoanFlowECSDescribeReadOnly (developer, qa, data-admin, auditor)",
+      "labels": ["iam", "aws", "mfa", "security", "groups", "base-policies"],
+      "priority": "High",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "All six groups exist and are listed in IAM",
+          "given": "group provisioning is complete",
+          "when": "aws iam list-groups is run",
+          "then": "loanflow-admin, loanflow-developer, loanflow-devops, loanflow-qa, loanflow-data-admin, and loanflow-auditor are all listed"
+        },
+        {
+          "scenario": "Any group member is denied all actions without MFA",
+          "given": "LoanFlowMFAEnforcement is attached to all groups",
+          "when": "a user from any group authenticates to the console without completing MFA",
+          "then": "every service action returns AccessDenied except iam:ListMFADevices, iam:EnableMFADevice, and iam:CreateVirtualMFADevice"
+        },
+        {
+          "scenario": "Users can manage their own password and MFA device without admin help",
+          "given": "LoanFlowSelfServiceIAM is attached to all groups",
+          "when": "a user navigates to the IAM My Security Credentials page and changes their password or registers an MFA device",
+          "then": "both actions succeed without requiring an administrator to intervene"
+        },
+        {
+          "scenario": "Developer and QA members can describe ECS services without modifying them",
+          "given": "LoanFlowECSDescribeReadOnly is attached to the developer and qa groups",
+          "when": "a developer runs aws ecs describe-services and aws ecs list-tasks",
+          "then": "the commands return service and task details but aws ecs update-service returns AccessDenied"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create all six loanflow- IAM groups",
+          "description": "Use aws iam create-group to create: loanflow-admin, loanflow-developer, loanflow-devops, loanflow-qa, loanflow-data-admin, and loanflow-auditor. Do not attach any policies at creation time — policies are attached in subsequent tasks and stories. Tag each group with Project=loanflow-360 and Environment=all. Document the group ARNs in Parameter Store at /loanflow/iam/groups/{group-name}-arn for reference by automation scripts."
+        },
+        {
+          "summary": "Create and attach LoanFlowMFAEnforcement policy to all six groups",
+          "description": "Create a customer managed policy named LoanFlowMFAEnforcement. The policy contains two statements: (1) an Allow on iam:ListMFADevices, iam:EnableMFADevice, iam:CreateVirtualMFADevice, iam:GetUser, iam:ListUsers with resource * and no condition — these actions are needed to complete MFA enrolment on first login. (2) a Deny on * with condition BoolIfExists aws:MultiFactorAuthPresent = false — this blanket deny overrides all other allows when the session was not authenticated with MFA. Attach this policy to all six groups using aws iam attach-group-policy."
+        },
+        {
+          "summary": "Create and attach LoanFlowSelfServiceIAM policy to all six groups",
+          "description": "Create a customer managed policy named LoanFlowSelfServiceIAM granting:\n- iam:GetUser on resource arn:aws:iam::*:user/${aws:username} (own user only)\n- iam:ChangePassword on resource arn:aws:iam::*:user/${aws:username}\n- iam:CreateAccessKey, iam:DeleteAccessKey, iam:UpdateAccessKey, iam:ListAccessKeys on resource arn:aws:iam::*:user/${aws:username}\n- iam:CreateVirtualMFADevice, iam:EnableMFADevice, iam:DeactivateMFADevice, iam:DeleteVirtualMFADevice, iam:ListMFADevices on resource * (MFA devices require * resource)\nThe ${aws:username} policy variable scopes all write actions to the authenticated user's own IAM user object. Attach to all six groups."
+        },
+        {
+          "summary": "Create and attach LoanFlowECSDescribeReadOnly policy to developer, qa, and data-admin groups",
+          "description": "Create a customer managed policy named LoanFlowECSDescribeReadOnly granting read-only ECS actions scoped to loanflow-* resources:\n- ecs:DescribeClusters, ecs:ListClusters\n- ecs:DescribeServices, ecs:ListServices\n- ecs:DescribeTasks, ecs:ListTasks\n- ecs:DescribeTaskDefinition, ecs:ListTaskDefinitions\n- ecs:DescribeContainerInstances\nScope cluster and service actions to arn:aws:ecs:*:*:cluster/loanflow-* and arn:aws:ecs:*:*:service/loanflow-*/*. Attach to loanflow-developer, loanflow-qa, and loanflow-data-admin groups. Do not attach to loanflow-admin (covered by broader policy) or loanflow-auditor (covered by read-only audit policy)."
+        }
+      ]
+    },
+    {
+      "summary": "Configure loanflow-admin group with full account management and billing policies",
+      "description": "Attach policies to the loanflow-admin group granting full AWS account administration including IAM user and group management, billing and cost visibility, and unrestricted access to all LoanFlow 360 services. Admin access is implemented by attaching the AWS managed AdministratorAccess policy rather than a custom policy — admins are trusted with full account scope by definition. A separate billing policy is attached for Cost Explorer and AWS Budgets access. An explicit condition requires MFA session duration to be recent (within 1 hour) for any IAM write operation, adding a time-bound security control beyond the base MFA enforcement.",
+      "labels": ["iam", "aws", "admin", "billing", "security"],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Admin user can create and manage IAM users and groups",
+          "given": "an admin user is authenticated with MFA",
+          "when": "the admin runs aws iam create-user and aws iam attach-group-policy",
+          "then": "both commands succeed and the changes are reflected immediately in IAM"
+        },
+        {
+          "scenario": "Admin user can view billing dashboards and create budget alerts",
+          "given": "the billing policy is attached",
+          "when": "the admin navigates to the AWS Cost Explorer and Budgets console",
+          "then": "cost and usage data is visible and a new budget can be created without an access error"
+        },
+        {
+          "scenario": "Admin IAM write operations require MFA session authenticated within the last hour",
+          "given": "an admin authenticated with MFA more than 60 minutes ago",
+          "when": "the admin attempts iam:CreateUser or iam:AttachUserPolicy",
+          "then": "the action is denied by the session age condition and the admin must re-authenticate with MFA"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Attach AWS managed AdministratorAccess policy to loanflow-admin group",
+          "description": "Attach the AWS managed policy arn:aws:iam::aws:policy/AdministratorAccess to the loanflow-admin group using aws iam attach-group-policy. This grants full access to all AWS services and resources. Membership in this group must be kept to the minimum number of named individuals and reviewed quarterly. Document all current admin group members in the project access register."
+        },
+        {
+          "summary": "Create and attach LoanFlowAdminBillingPolicy for Cost Explorer and Budgets access",
+          "description": "Create a customer managed policy named LoanFlowAdminBillingPolicy granting:\n- ce:GetCostAndUsage, ce:GetCostForecast, ce:GetReservationUtilization, ce:GetUsageForecast, ce:DescribeCostCategoryDefinition\n- budgets:ViewBudget, budgets:CreateBudget, budgets:ModifyBudget, budgets:DeleteBudget\n- aws-portal:ViewBilling, aws-portal:ViewUsage, aws-portal:ViewAccount\nAttach to loanflow-admin. Note: billing console access also requires the account-level IAM Billing setting to be enabled by the root user — document this as a prerequisite."
+        },
+        {
+          "summary": "Add MFA session age condition to IAM write actions for admin group",
+          "description": "Create a customer managed policy named LoanFlowAdminIAMWriteGuard with a Deny statement on sensitive IAM mutations: iam:CreateUser, iam:DeleteUser, iam:AttachUserPolicy, iam:DetachUserPolicy, iam:AttachGroupPolicy, iam:DetachGroupPolicy, iam:CreateRole, iam:DeleteRole, iam:PutUserPolicy, iam:PutGroupPolicy. Apply a deny condition: NumericGreaterThan aws:MultiFactorAuthAge 3600. This enforces that IAM write operations can only be performed within 60 minutes of MFA authentication, limiting the window of exposure from a stolen session token. Attach to loanflow-admin."
+        }
+      ]
+    },
+    {
+      "summary": "Configure loanflow-developer group with application development policies",
+      "description": "Attach granular policies to the loanflow-developer group scoped to the actions a backend or frontend engineer needs for daily development work: pulling images from ECR to run services locally, reading CloudWatch Logs for the dev environment to debug application issues, reading Secrets Manager for dev credentials to configure local overrides, reading Parameter Store values, describing RDS and ElastiCache resources for connection details, and triggering Jenkins builds. Developers have no ability to modify infrastructure, push to ECR, or access test or production resources. All resource conditions are scoped to dev environment paths and resource names.",
+      "labels": ["iam", "aws", "developer", "ecr", "cloudwatch", "secrets-manager"],
+      "priority": "High",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Developer can pull Docker images from ECR repositories",
+          "given": "LoanFlowDeveloperECRPullPolicy is attached",
+          "when": "a developer runs aws ecr get-login-password and docker pull on a loanflow/ repository",
+          "then": "authentication succeeds and the image is pulled to the local workstation"
+        },
+        {
+          "scenario": "Developer can tail CloudWatch Logs for dev environment services only",
+          "given": "LoanFlowDeveloperCloudWatchPolicy is attached",
+          "when": "a developer runs aws logs tail /loanflow/dev/loan-service",
+          "then": "logs stream successfully but aws logs tail /loanflow/prod/loan-service returns AccessDenied"
+        },
+        {
+          "scenario": "Developer can read dev Secrets Manager secrets but not prod secrets",
+          "given": "LoanFlowDeveloperSecretsReadPolicy is attached",
+          "when": "a developer runs aws secretsmanager get-secret-value --secret-id /loanflow/dev/loan-service/db-password",
+          "then": "the secret value is returned but /loanflow/prod/loan-service/db-password returns AccessDenied"
+        },
+        {
+          "scenario": "Developer cannot push images to ECR or modify any infrastructure resource",
+          "given": "the developer group policies are in effect",
+          "when": "a developer attempts aws ecr put-image or aws ecs update-service",
+          "then": "both actions return AccessDenied"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create LoanFlowDeveloperECRPullPolicy for local image pulls",
+          "description": "Create a customer managed policy named LoanFlowDeveloperECRPullPolicy granting:\n- ecr:GetAuthorizationToken on resource *\n- ecr:BatchGetImage, ecr:GetDownloadUrlForLayer, ecr:BatchCheckLayerAvailability on resource arn:aws:ecr:*:*:repository/loanflow/*\n- ecr:DescribeRepositories, ecr:ListImages, ecr:DescribeImages on resource arn:aws:ecr:*:*:repository/loanflow/*\nPull actions are intentionally read-only — ecr:PutImage, ecr:InitiateLayerUpload, ecr:UploadLayerPart, ecr:CompleteLayerUpload are not included. Attach to loanflow-developer."
+        },
+        {
+          "summary": "Create LoanFlowDeveloperCloudWatchPolicy scoped to dev log groups",
+          "description": "Create a customer managed policy named LoanFlowDeveloperCloudWatchPolicy granting:\n- logs:DescribeLogGroups, logs:DescribeLogStreams on resource *\n- logs:GetLogEvents, logs:FilterLogEvents on resource arn:aws:logs:*:*:log-group:/loanflow/dev/*\n- logs:StartQuery, logs:GetQueryResults, logs:StopQuery on resource arn:aws:logs:*:*:log-group:/loanflow/dev/*\n- cloudwatch:GetMetricStatistics, cloudwatch:ListMetrics, cloudwatch:DescribeAlarms on resource *\nThe /loanflow/dev/* resource scope prevents developers from reading test or production logs. Attach to loanflow-developer."
+        },
+        {
+          "summary": "Create LoanFlowDeveloperSecretsAndSSMPolicy scoped to dev paths",
+          "description": "Create a customer managed policy named LoanFlowDeveloperSecretsAndSSMPolicy granting:\n- secretsmanager:GetSecretValue, secretsmanager:DescribeSecret, secretsmanager:ListSecrets on resource arn:aws:secretsmanager:*:*:secret:/loanflow/dev/*\n- ssm:GetParameter, ssm:GetParameters, ssm:GetParametersByPath on resource arn:aws:ssm:*:*:parameter/loanflow/dev/*\n- rds:DescribeDBInstances, rds:DescribeDBSubnetGroups on resource *\n- elasticache:DescribeReplicationGroups, elasticache:DescribeCacheClusters on resource *\nRead actions on RDS and ElastiCache are unscoped (describe does not expose credentials — just metadata) and allow developers to find the correct endpoint for local tunnel configuration. Attach to loanflow-developer."
+        }
+      ]
+    },
+    {
+      "summary": "Configure loanflow-qa group with test environment deployment and verification policies",
+      "description": "Attach granular policies to the loanflow-qa group scoped exclusively to the test environment. QA engineers need to trigger ECS service deployments in test (to deploy a candidate build for integration testing), read CloudWatch Logs for test services to verify behaviour and diagnose failures, read S3 document bucket objects to verify upload and retrieval flows, and read Secrets Manager and Parameter Store values for the test environment to configure test tooling. QA cannot modify infrastructure, cannot access dev or production resources, and cannot push to ECR. ECS update-service is permitted for the test cluster only.",
+      "labels": ["iam", "aws", "qa", "ecs", "cloudwatch", "s3", "test-environment"],
+      "priority": "High",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "QA engineer can trigger a rolling ECS deployment in the test cluster",
+          "given": "LoanFlowQAECSDeployPolicy is attached",
+          "when": "a QA engineer runs aws ecs update-service --cluster loanflow-test --service loanflow-test-loan-service --force-new-deployment",
+          "then": "the deployment is triggered successfully and the service begins a rolling update"
+        },
+        {
+          "scenario": "QA engineer cannot trigger deployments in dev or prod clusters",
+          "given": "the policy resource condition is applied",
+          "when": "a QA engineer runs aws ecs update-service --cluster loanflow-prod",
+          "then": "the action returns AccessDenied due to the cluster ARN resource condition"
+        },
+        {
+          "scenario": "QA engineer can read test environment logs and S3 objects",
+          "given": "LoanFlowQACloudWatchAndS3Policy is attached",
+          "when": "a QA engineer runs aws logs tail /loanflow/test/api-gateway and aws s3 cp from loanflow-test-documents",
+          "then": "both commands succeed and return data"
+        },
+        {
+          "scenario": "QA engineer cannot delete S3 objects or CloudWatch log groups",
+          "given": "the QA policies grant read-only S3 and CloudWatch access",
+          "when": "a QA engineer attempts aws s3 rm or aws logs delete-log-group",
+          "then": "both commands return AccessDenied"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create LoanFlowQAECSDeployPolicy scoped to the test cluster",
+          "description": "Create a customer managed policy named LoanFlowQAECSDeployPolicy granting:\n- ecs:UpdateService on resource arn:aws:ecs:*:*:service/loanflow-test/*\n- ecs:DescribeServices, ecs:ListServices, ecs:DescribeTasks, ecs:ListTasks, ecs:DescribeClusters on resource arn:aws:ecs:*:*:cluster/loanflow-test and arn:aws:ecs:*:*:service/loanflow-test/*\n- ecs:DescribeTaskDefinition, ecs:ListTaskDefinitions on resource *\nThe UpdateService action is restricted to the loanflow-test cluster ARN pattern. ecs:RunTask and ecs:StopTask are not included — QA triggers rolling restarts, not direct task management. Attach to loanflow-qa."
+        },
+        {
+          "summary": "Create LoanFlowQACloudWatchAndS3Policy scoped to test environment resources",
+          "description": "Create a customer managed policy named LoanFlowQACloudWatchAndS3Policy granting:\n- logs:DescribeLogGroups, logs:DescribeLogStreams, logs:GetLogEvents, logs:FilterLogEvents, logs:StartQuery, logs:GetQueryResults on resource arn:aws:logs:*:*:log-group:/loanflow/test/*\n- cloudwatch:GetMetricStatistics, cloudwatch:ListMetrics, cloudwatch:DescribeAlarms on resource *\n- s3:GetObject, s3:ListBucket on resource arn:aws:s3:::loanflow-test-documents and arn:aws:s3:::loanflow-test-documents/*\n- s3:ListAllMyBuckets on resource *\nS3 access is read-only (no PutObject, DeleteObject). CloudWatch metrics are unrestricted for read since the namespace filter is advisory. Attach to loanflow-qa."
+        },
+        {
+          "summary": "Create LoanFlowQASecretsAndSSMReadPolicy scoped to test paths",
+          "description": "Create a customer managed policy named LoanFlowQASecretsAndSSMReadPolicy granting:\n- secretsmanager:GetSecretValue, secretsmanager:DescribeSecret on resource arn:aws:secretsmanager:*:*:secret:/loanflow/test/*\n- ssm:GetParameter, ssm:GetParameters, ssm:GetParametersByPath on resource arn:aws:ssm:*:*:parameter/loanflow/test/*\n- rds:DescribeDBInstances on resource *\nQA engineers need test environment connection details to configure integration test runners and load test tooling. They do not need dev or prod secret values. Attach to loanflow-qa."
+        }
+      ]
+    },
+    {
+      "summary": "Configure loanflow-data-admin group with data store administration policies",
+      "description": "Attach granular policies to the loanflow-data-admin group granting full administrative access to all LoanFlow 360 managed data stores: RDS MySQL instances, ElastiCache Redis clusters, MSK Kafka cluster (including topic management via the Kafka CLI), DocumentDB cluster, and S3 document buckets. Data admins manage schema migrations on RDS, Redis keyspace operations via ElastiCache CLI, Kafka topic partition and retention configuration, DocumentDB index management, and S3 lifecycle rules. All resource conditions are scoped to loanflow-* identifiers. Data admins can read Secrets Manager database credentials and connection endpoints from Parameter Store but cannot modify application infrastructure or IAM.",
+      "labels": ["iam", "aws", "rds", "elasticache", "msk", "documentdb", "s3", "data-admin"],
+      "priority": "High",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Data admin can create and restore RDS snapshots for all loanflow- instances",
+          "given": "LoanFlowDataAdminRDSPolicy is attached",
+          "when": "a data admin runs aws rds create-db-snapshot --db-instance-identifier loanflow-prod-loan-service",
+          "then": "the snapshot is created and aws rds describe-db-snapshots returns it with status available"
+        },
+        {
+          "scenario": "Data admin can read database credentials from Secrets Manager for all environments",
+          "given": "the data admin secrets policy is attached",
+          "when": "a data admin runs aws secretsmanager get-secret-value --secret-id /loanflow/prod/loan-service/db-password",
+          "then": "the password value is returned — the data admin needs prod credentials to perform schema migrations"
+        },
+        {
+          "scenario": "Data admin can modify MSK cluster configuration but cannot delete it",
+          "given": "LoanFlowDataAdminMSKPolicy is attached",
+          "when": "a data admin runs aws kafka update-cluster-configuration",
+          "then": "the update succeeds but aws kafka delete-cluster returns AccessDenied"
+        },
+        {
+          "scenario": "Data admin cannot modify ECS services, EC2 instances, or IAM resources",
+          "given": "the data-admin group policies grant only data store actions",
+          "when": "a data admin attempts aws ecs update-service, aws ec2 terminate-instances, or aws iam create-role",
+          "then": "all three commands return AccessDenied"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create LoanFlowDataAdminRDSPolicy for MySQL instance and snapshot management",
+          "description": "Create a customer managed policy named LoanFlowDataAdminRDSPolicy granting:\n- rds:DescribeDBInstances, rds:ModifyDBInstance (parameter group changes only — no class changes)\n- rds:CreateDBSnapshot, rds:DeleteDBSnapshot, rds:DescribeDBSnapshots, rds:RestoreDBInstanceFromDBSnapshot\n- rds:DescribeDBParameterGroups, rds:ModifyDBParameterGroup\n- rds:DescribeDBLogFiles, rds:DownloadDBLogFilePortion\n- rds:RebootDBInstance\nExplicitly exclude: rds:DeleteDBInstance, rds:CreateDBInstance, rds:ModifyDBInstance for storage or class changes. Scope all instance actions to arn:aws:rds:*:*:db:loanflow-*. Attach to loanflow-data-admin."
+        },
+        {
+          "summary": "Create LoanFlowDataAdminElastiCacheAndDocDBPolicy",
+          "description": "Create a customer managed policy named LoanFlowDataAdminElastiCacheAndDocDBPolicy granting:\n- elasticache:DescribeReplicationGroups, elasticache:ModifyReplicationGroup, elasticache:RebootCacheCluster\n- elasticache:CreateSnapshot, elasticache:DeleteSnapshot, elasticache:DescribeSnapshots\n- rds:DescribeDBClusters, rds:ModifyDBCluster (DocumentDB uses RDS API namespace)\n- rds:CreateDBClusterSnapshot, rds:DeleteDBClusterSnapshot, rds:DescribeDBClusterSnapshots\n- rds:DescribeDBClusterParameters, rds:ModifyDBClusterParameterGroup\nScope ElastiCache to arn:aws:elasticache:*:*:replicationgroup:loanflow-*. Scope DocumentDB clusters to arn:aws:rds:*:*:cluster:loanflow-*. Attach to loanflow-data-admin."
+        },
+        {
+          "summary": "Create LoanFlowDataAdminMSKAndS3Policy for Kafka and document storage",
+          "description": "Create a customer managed policy named LoanFlowDataAdminMSKAndS3Policy granting:\n- kafka:DescribeCluster, kafka:UpdateClusterConfiguration, kafka:UpdateBrokerStorage\n- kafka:GetBootstrapBrokers, kafka:ListClusters, kafka:ListNodes\n- kafka:BatchAssociateScramSecret, kafka:ListScramSecrets\nExplicitly exclude kafka:DeleteCluster and kafka:CreateCluster — topic-level operations (creation, retention changes, partition increase) are performed via the Kafka CLI connecting to the broker, not via MSK API actions.\nAdd S3 actions: s3:GetObject, s3:PutObject, s3:DeleteObject, s3:ListBucket, s3:GetBucketLifecycleConfiguration, s3:PutBucketLifecycleConfiguration on arn:aws:s3:::loanflow-* and arn:aws:s3:::loanflow-*/*. Data admins may need to manually manage document objects and adjust lifecycle rules. Attach to loanflow-data-admin."
+        },
+        {
+          "summary": "Create LoanFlowDataAdminSecretsAndSSMReadPolicy for cross-environment credential access",
+          "description": "Create a customer managed policy named LoanFlowDataAdminSecretsAndSSMReadPolicy granting:\n- secretsmanager:GetSecretValue, secretsmanager:DescribeSecret, secretsmanager:ListSecrets on resource arn:aws:secretsmanager:*:*:secret:/loanflow/*\n- ssm:GetParameter, ssm:GetParameters, ssm:GetParametersByPath on resource arn:aws:ssm:*:*:parameter/loanflow/*\nUnlike the developer and QA policies, data admins receive read access across all environments — dev, test, and prod — because schema migrations and data fixes may require connecting directly to production databases using the stored credentials. Attach to loanflow-data-admin."
+        }
+      ]
+    },
+    {
+      "summary": "Configure loanflow-auditor group with read-only compliance and security review policies",
+      "description": "Attach granular policies to the loanflow-auditor group granting read-only access to the AWS services required for security and compliance review: IAM (to inspect users, groups, roles, and policies), CloudTrail (to review API call history), AWS Config (to evaluate resource configuration compliance), CloudWatch (to review logs, metrics, and alarms), Secrets Manager (to confirm secret existence and metadata — not secret values), and SecurityHub (to review findings and standards compliance). Auditors can read everything and change nothing. The GetSecretValue action is explicitly excluded from the Secrets Manager policy — auditors confirm secrets exist and are configured correctly without needing to read the actual credential values.",
+      "labels": ["iam", "aws", "auditor", "compliance", "cloudtrail", "security-hub", "read-only"],
+      "priority": "Medium",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Auditor can generate an IAM credential report for the full account",
+          "given": "LoanFlowAuditorIAMReadPolicy is attached",
+          "when": "an auditor runs aws iam generate-credential-report and aws iam get-credential-report",
+          "then": "the credential report is generated and returned showing MFA status and last-used dates for all IAM users"
+        },
+        {
+          "scenario": "Auditor can query CloudTrail for all API calls made by a specific IAM user",
+          "given": "LoanFlowAuditorCloudTrailPolicy is attached",
+          "when": "an auditor runs aws cloudtrail lookup-events with a username filter",
+          "then": "all recent API events for that user are returned with timestamps and source IPs"
+        },
+        {
+          "scenario": "Auditor can view Secrets Manager secret metadata but cannot retrieve secret values",
+          "given": "LoanFlowAuditorSecretsMetaPolicy is attached",
+          "when": "an auditor runs aws secretsmanager describe-secret on a /loanflow/* secret",
+          "then": "the metadata (ARN, name, rotation config, last accessed date) is returned but aws secretsmanager get-secret-value returns AccessDenied"
+        },
+        {
+          "scenario": "Auditor cannot modify any AWS resource",
+          "given": "auditor group policies are all read-only",
+          "when": "an auditor attempts aws iam create-user, aws cloudwatch delete-alarms, or aws s3 rm",
+          "then": "all mutation commands return AccessDenied"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create LoanFlowAuditorIAMReadPolicy for IAM and account inspection",
+          "description": "Create a customer managed policy named LoanFlowAuditorIAMReadPolicy granting:\n- iam:GetAccountSummary, iam:GetAccountPasswordPolicy\n- iam:GenerateCredentialReport, iam:GetCredentialReport\n- iam:ListUsers, iam:GetUser, iam:ListUserPolicies, iam:ListAttachedUserPolicies\n- iam:ListGroups, iam:GetGroup, iam:ListGroupPolicies, iam:ListAttachedGroupPolicies\n- iam:ListRoles, iam:GetRole, iam:ListRolePolicies, iam:ListAttachedRolePolicies\n- iam:GetPolicy, iam:GetPolicyVersion, iam:ListPolicies\n- iam:ListMFADevices, iam:ListVirtualMFADevices\n- iam:SimulatePrincipalPolicy (for validating effective permissions in the Policy Simulator)\nAll on resource *. No write or update actions. Attach to loanflow-auditor."
+        },
+        {
+          "summary": "Create LoanFlowAuditorCloudTrailAndConfigPolicy",
+          "description": "Create a customer managed policy named LoanFlowAuditorCloudTrailAndConfigPolicy granting:\n- cloudtrail:LookupEvents, cloudtrail:GetTrail, cloudtrail:DescribeTrails, cloudtrail:GetTrailStatus, cloudtrail:ListTrails\n- cloudtrail:GetEventSelectors, cloudtrail:ListTags\n- config:DescribeConfigRules, config:GetComplianceDetailsByResource, config:GetComplianceSummaryByConfigRule\n- config:DescribeConfigurationRecorders, config:DescribeDeliveryChannels\n- config:ListDiscoveredResources, config:GetResourceConfigHistory\nAll on resource *. CloudTrail read grants visibility into every API call in the account — this is appropriate for an auditor but must be limited to this group only. Attach to loanflow-auditor."
+        },
+        {
+          "summary": "Create LoanFlowAuditorCloudWatchAndSecurityHubPolicy",
+          "description": "Create a customer managed policy named LoanFlowAuditorCloudWatchAndSecurityHubPolicy granting:\n- logs:DescribeLogGroups, logs:DescribeLogStreams, logs:GetLogEvents, logs:FilterLogEvents, logs:StartQuery, logs:GetQueryResults on resource *\n- cloudwatch:DescribeAlarms, cloudwatch:GetMetricStatistics, cloudwatch:ListMetrics, cloudwatch:GetDashboard, cloudwatch:ListDashboards\n- securityhub:GetFindings, securityhub:DescribeHub, securityhub:ListStandardsControlAssociations\n- securityhub:GetEnabledStandards, securityhub:DescribeStandards, securityhub:DescribeStandardsControls\nCloudWatch Logs resource is * for auditors — they need to review all log groups including infrastructure and application logs across all environments. Attach to loanflow-auditor."
+        },
+        {
+          "summary": "Create LoanFlowAuditorSecretsMetaPolicy granting ListSecrets and DescribeSecret but not GetSecretValue",
+          "description": "Create a customer managed policy named LoanFlowAuditorSecretsMetaPolicy granting:\n- secretsmanager:ListSecrets on resource *\n- secretsmanager:DescribeSecret on resource arn:aws:secretsmanager:*:*:secret:/loanflow/*\n- secretsmanager:GetRotationConfiguration (implicit in DescribeSecret, but listed explicitly for clarity)\nAdd an explicit Deny on secretsmanager:GetSecretValue for resource *. The Deny ensures GetSecretValue is blocked even if a future policy attachment were to grant it inadvertently. Auditors can confirm all expected secrets exist, verify rotation is enabled, and see the last accessed date — all without ever reading a live credential. Attach to loanflow-auditor."
+        }
+      ]
+    }
+  ]
+}

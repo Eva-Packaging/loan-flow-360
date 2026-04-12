@@ -1,0 +1,270 @@
+{
+  "summary": "Configure IAM Roles, Groups, and Policies for DevOps Infrastructure Implementation",
+  "description": "Provision the IAM foundation that grants a DevOps team member the permissions required to implement all LoanFlow 360 AWS infrastructure epics: core VPC networking, ECR repositories, RDS, ElastiCache, MSK, S3, DocumentDB, ECS Fargate cluster and services, ALB, Secrets Manager, CloudWatch logging and alarms, SNS, Lambda (rotation), Jenkins EC2, and the Jenkins and ECS execution IAM roles. All permissions are granted through a dedicated loanflow-devops IAM group with custom managed policies that follow least-privilege principles — the DevOps member receives exactly the service actions needed to provision and operate the documented infrastructure, nothing broader. A permission boundary is applied to the group's IAM management policy to prevent privilege escalation. MFA is enforced for console access and all sensitive operations.",
+  "labels": ["iam", "aws", "security", "devops", "access-control", "infrastructure"],
+  "priority": "High",
+  "userType": "AWS system administrator",
+  "functionality": "create a fully scoped IAM user, group, and policy set that grants a DevOps member the minimum permissions needed to provision all LoanFlow 360 AWS infrastructure without granting administrator access or the ability to escalate their own privileges",
+  "benefit": "unblock the DevOps member from implementing infrastructure epics while maintaining the principle of least privilege, preventing accidental or unauthorised changes outside the LoanFlow 360 resource scope, and producing an auditable access model that can be reviewed and reproduced",
+  "stories": [
+    {
+      "summary": "Create DevOps IAM user, group, and enforce MFA and access controls",
+      "description": "Create the loanflow-devops IAM group that will receive all infrastructure permissions, provision the IAM user for the DevOps team member, add the user to the group, and enforce MFA and a strong password policy. A deny-all policy condition is applied to all sensitive actions when MFA has not been authenticated, ensuring credentials alone are insufficient to make changes. Programmatic access keys are issued for CLI and Terraform/CDK use; console access is secured with MFA. All activity by this user is traceable via CloudTrail.",
+      "labels": ["iam", "aws", "security", "mfa", "access-control"],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "DevOps user cannot perform any infrastructure action without MFA",
+          "given": "the DevOps IAM user is authenticated to the console without MFA",
+          "when": "the user attempts to create a VPC or launch an EC2 instance",
+          "then": "the action is denied with an explicit Deny from the MFA enforcement policy condition"
+        },
+        {
+          "scenario": "DevOps user is a member of the loanflow-devops group and inherits its policies",
+          "given": "the user is added to the loanflow-devops group",
+          "when": "aws iam list-groups-for-user is run for the DevOps user",
+          "then": "loanflow-devops is listed as an attached group"
+        },
+        {
+          "scenario": "Account password policy enforces minimum length and complexity",
+          "given": "the IAM account password policy is configured",
+          "when": "the DevOps user attempts to set a password shorter than 16 characters or without mixed case and numbers",
+          "then": "the password change is rejected by the password policy"
+        },
+        {
+          "scenario": "CloudTrail records all API calls made by the DevOps user",
+          "given": "CloudTrail is enabled in the AWS account",
+          "when": "the DevOps user creates any AWS resource",
+          "then": "the API call appears in CloudTrail with the DevOps user ARN as the principal within 15 minutes"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create the loanflow-devops IAM group",
+          "description": "Create an IAM group named loanflow-devops. This group receives all custom managed policies defined in subsequent stories. No AWS managed policies (e.g. AdministratorAccess, PowerUserAccess) are attached to this group — all permissions are defined in purpose-built custom policies scoped to LoanFlow 360 resources."
+        },
+        {
+          "summary": "Create the DevOps IAM user and add to the loanflow-devops group",
+          "description": "Create an IAM user for the DevOps team member with console access enabled. Generate a temporary password and require a reset on first login. Add the user to the loanflow-devops group. Generate programmatic access keys (Access Key ID and Secret Access Key) for CLI use and deliver them securely — do not email or commit them. Record the user ARN for CloudTrail and audit reference."
+        },
+        {
+          "summary": "Attach MFA enforcement policy to loanflow-devops group",
+          "description": "Create and attach a customer managed policy named LoanFlowMFAEnforcement to the loanflow-devops group. The policy allows iam:GetUser, iam:ListMFADevices, iam:EnableMFADevice, and iam:CreateVirtualMFADevice without MFA so the user can self-enroll. All other actions include a Deny condition:\n```\n{\"Condition\": {\"BoolIfExists\": {\"aws:MultiFactorAuthPresent\": \"false\"}}}\n```\nThis pattern allows the user to set up MFA on first login before being able to perform any infrastructure work."
+        },
+        {
+          "summary": "Configure account-level password policy and verify CloudTrail is active",
+          "description": "Using the IAM console or CLI, set the account password policy to: minimum length 16, require uppercase, lowercase, numbers and symbols, prevent password reuse for last 5 passwords, expire passwords every 90 days. Confirm CloudTrail has an active trail logging all management events to an S3 bucket and that the trail covers the AWS region where LoanFlow 360 resources will be provisioned."
+        }
+      ]
+    },
+    {
+      "summary": "Create and attach networking, EC2, and container infrastructure policy",
+      "description": "Create the custom IAM managed policy LoanFlowDevOpsNetworkingAndContainerPolicy and attach it to the loanflow-devops group. This policy grants the permissions required to implement the VPC networking story (VPC, subnets, internet gateways, NAT gateways, route tables, security groups, Elastic IPs), the ALB and target group provisioning story, the Jenkins EC2 instance story (instance launch, EBS, key pairs, nginx on EC2), and the ECR and ECS stories (repositories, clusters, task definitions, Fargate services, capacity providers). Resource conditions scope permissions to resources tagged Project=loanflow-360 where the service supports tag-based conditions.",
+      "labels": ["iam", "aws", "ec2", "vpc", "ecs", "ecr", "alb", "networking"],
+      "priority": "High",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "DevOps member can create and describe VPC resources",
+          "given": "the LoanFlowDevOpsNetworkingAndContainerPolicy is attached",
+          "when": "the DevOps user runs aws ec2 create-vpc --cidr-block 10.0.0.0/16",
+          "then": "the VPC is created successfully and the response includes the VpcId"
+        },
+        {
+          "scenario": "DevOps member can create ECR repositories and push images",
+          "given": "the policy is attached",
+          "when": "the DevOps user runs aws ecr create-repository --repository-name loanflow/api-gateway",
+          "then": "the repository is created and the user can authenticate with aws ecr get-login-password and push an image"
+        },
+        {
+          "scenario": "DevOps member can register ECS task definitions and create Fargate services",
+          "given": "the policy is attached",
+          "when": "the DevOps user runs aws ecs register-task-definition and aws ecs create-service",
+          "then": "both commands succeed and the resources are visible in the ECS console"
+        },
+        {
+          "scenario": "DevOps member cannot launch EC2 instances outside the loanflow- naming convention",
+          "given": "the policy includes a resource condition on EC2 instance names",
+          "when": "the DevOps user attempts to launch an instance without a Name tag matching loanflow-*",
+          "then": "the launch request is denied by the resource condition in the policy"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create LoanFlowDevOpsNetworkingAndContainerPolicy with VPC and ALB permissions",
+          "description": "Create a customer managed policy with the following EC2 and ELB action groups:\n- ec2:CreateVpc, ec2:DeleteVpc, ec2:DescribeVpcs\n- ec2:CreateSubnet, ec2:DeleteSubnet, ec2:DescribeSubnets\n- ec2:CreateInternetGateway, ec2:AttachInternetGateway, ec2:DeleteInternetGateway\n- ec2:CreateNatGateway, ec2:DeleteNatGateway, ec2:DescribeNatGateways\n- ec2:CreateRouteTable, ec2:CreateRoute, ec2:AssociateRouteTable, ec2:DeleteRouteTable\n- ec2:CreateSecurityGroup, ec2:AuthorizeSecurityGroupIngress, ec2:AuthorizeSecurityGroupEgress, ec2:DeleteSecurityGroup, ec2:DescribeSecurityGroups\n- ec2:AllocateAddress, ec2:ReleaseAddress, ec2:DescribeAddresses\n- elasticloadbalancing:CreateLoadBalancer, elasticloadbalancing:DeleteLoadBalancer, elasticloadbalancing:DescribeLoadBalancers\n- elasticloadbalancing:CreateTargetGroup, elasticloadbalancing:DeleteTargetGroup, elasticloadbalancing:DescribeTargetGroups, elasticloadbalancing:ModifyTargetGroupAttributes\n- elasticloadbalancing:CreateListener, elasticloadbalancing:DeleteListener, elasticloadbalancing:DescribeListeners\n- elasticloadbalancing:CreateRule, elasticloadbalancing:DeleteRule\n- elasticloadbalancing:RegisterTargets, elasticloadbalancing:DeregisterTargets, elasticloadbalancing:DescribeTargetHealth\n- acm:RequestCertificate, acm:DescribeCertificate, acm:ListCertificates (for ALB HTTPS listener)"
+        },
+        {
+          "summary": "Add EC2 instance management permissions to the policy",
+          "description": "Extend the policy with EC2 instance permissions needed to provision the Jenkins master:\n- ec2:RunInstances, ec2:TerminateInstances, ec2:StopInstances, ec2:StartInstances\n- ec2:DescribeInstances, ec2:DescribeInstanceStatus\n- ec2:CreateVolume, ec2:AttachVolume, ec2:DetachVolume, ec2:DeleteVolume, ec2:DescribeVolumes\n- ec2:CreateKeyPair, ec2:DeleteKeyPair, ec2:DescribeKeyPairs\n- ec2:CreateTags, ec2:DescribeTags\nAdd an IAM condition on ec2:RunInstances requiring the request to include a tag with key Name and value matching loanflow-* to prevent the DevOps user from launching arbitrary instances on the account."
+        },
+        {
+          "summary": "Add ECR repository management permissions to the policy",
+          "description": "Extend the policy with ECR permissions needed to provision repositories and support the Jenkins pipeline:\n- ecr:CreateRepository, ecr:DeleteRepository, ecr:DescribeRepositories\n- ecr:PutImageTagMutability, ecr:PutImageScanningConfiguration\n- ecr:PutLifecyclePolicy, ecr:GetLifecyclePolicy\n- ecr:GetAuthorizationToken (required for docker login — must be on resource *)\n- ecr:BatchCheckLayerAvailability, ecr:PutImage, ecr:InitiateLayerUpload, ecr:UploadLayerPart, ecr:CompleteLayerUpload\n- ecr:BatchGetImage, ecr:GetDownloadUrlForLayer\nScope repository-level actions to resource ARNs matching arn:aws:ecr:*:*:repository/loanflow/*."
+        },
+        {
+          "summary": "Add ECS cluster, task definition, and Fargate service permissions to the policy",
+          "description": "Extend the policy with ECS permissions needed to implement the ECS task definition and Fargate services epic:\n- ecs:CreateCluster, ecs:DeleteCluster, ecs:DescribeClusters, ecs:UpdateClusterSettings\n- ecs:PutClusterCapacityProviders\n- ecs:RegisterTaskDefinition, ecs:DeregisterTaskDefinition, ecs:DescribeTaskDefinition, ecs:ListTaskDefinitions\n- ecs:CreateService, ecs:DeleteService, ecs:UpdateService, ecs:DescribeServices, ecs:ListServices\n- ecs:RunTask, ecs:StopTask, ecs:DescribeTasks, ecs:ListTasks\n- ecs:TagResource, ecs:UntagResource\nScope cluster and service actions to resource ARNs matching arn:aws:ecs:*:*:cluster/loanflow-* and arn:aws:ecs:*:*:service/loanflow-*/*."
+        },
+        {
+          "summary": "Attach LoanFlowDevOpsNetworkingAndContainerPolicy to the loanflow-devops group and validate",
+          "description": "Attach the completed policy to the loanflow-devops group using aws iam attach-group-policy. Validate permissions using the IAM Policy Simulator: test that the DevOps user can create a VPC, create an ECR repository, register a task definition, and create an ECS service. Confirm that ec2:RunInstances without a loanflow-* Name tag is denied by the simulator."
+        }
+      ]
+    },
+    {
+      "summary": "Create and attach managed data store provisioning policy",
+      "description": "Create the custom IAM managed policy LoanFlowDevOpsDataStorePolicy and attach it to the loanflow-devops group. This policy grants the permissions required to implement the RDS MySQL, ElastiCache Redis, MSK Kafka, S3 document bucket, and DocumentDB provisioning stories from the core infrastructure epic. Resource conditions scope RDS, ElastiCache, and DocumentDB actions to cluster and instance identifiers matching the loanflow- naming prefix. S3 permissions are scoped to buckets whose names match loanflow-*.",
+      "labels": ["iam", "aws", "rds", "elasticache", "msk", "s3", "documentdb", "security"],
+      "priority": "High",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "DevOps member can provision an RDS MySQL instance",
+          "given": "LoanFlowDevOpsDataStorePolicy is attached",
+          "when": "the DevOps user runs aws rds create-db-instance with a DB identifier prefixed loanflow-",
+          "then": "the RDS instance is created and enters the available state"
+        },
+        {
+          "scenario": "DevOps member can create an S3 bucket and configure lifecycle rules",
+          "given": "the policy is attached",
+          "when": "the DevOps user runs aws s3api create-bucket with a bucket name matching loanflow-*",
+          "then": "the bucket is created and the user can apply bucket policies and lifecycle configurations"
+        },
+        {
+          "scenario": "DevOps member is denied access to RDS instances outside the loanflow- prefix",
+          "given": "the RDS resource condition is applied",
+          "when": "the DevOps user attempts to describe or modify an RDS instance not prefixed with loanflow-",
+          "then": "the action is denied by the resource ARN condition in the policy"
+        },
+        {
+          "scenario": "DevOps member can provision an MSK cluster and manage Kafka topics",
+          "given": "the policy is attached",
+          "when": "the DevOps user runs aws kafka create-cluster and aws kafka batch-associate-scram-secret",
+          "then": "both commands succeed"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create LoanFlowDevOpsDataStorePolicy with RDS permissions",
+          "description": "Create a customer managed policy with the following RDS actions:\n- rds:CreateDBInstance, rds:DeleteDBInstance, rds:ModifyDBInstance, rds:DescribeDBInstances\n- rds:CreateDBSubnetGroup, rds:DeleteDBSubnetGroup, rds:DescribeDBSubnetGroups\n- rds:CreateDBParameterGroup, rds:ModifyDBParameterGroup, rds:DescribeDBParameterGroups\n- rds:CreateDBSnapshot, rds:DeleteDBSnapshot, rds:DescribeDBSnapshots\n- rds:RestoreDBInstanceFromDBSnapshot\n- rds:AddTagsToResource, rds:ListTagsForResource\n- rds:ModifyDBInstanceMasterPassword\nScope all instance and snapshot actions to resource ARNs containing loanflow in the identifier: arn:aws:rds:*:*:db:loanflow-* and arn:aws:rds:*:*:snapshot:loanflow-*. Subnet groups and parameter groups must also match arn:aws:rds:*:*:subgrp:loanflow-* and arn:aws:rds:*:*:pg:loanflow-*."
+        },
+        {
+          "summary": "Add ElastiCache and DocumentDB permissions to the policy",
+          "description": "Extend the policy with ElastiCache actions:\n- elasticache:CreateReplicationGroup, elasticache:DeleteReplicationGroup, elasticache:DescribeReplicationGroups, elasticache:ModifyReplicationGroup\n- elasticache:CreateCacheSubnetGroup, elasticache:DeleteCacheSubnetGroup, elasticache:DescribeCacheSubnetGroups\n- elasticache:CreateCacheParameterGroup, elasticache:DescribeCacheParameterGroups\n- elasticache:AddTagsToResource, elasticache:ListTagsForResource\nAdd DocumentDB actions:\n- rds:CreateDBCluster, rds:DeleteDBCluster, rds:DescribeDBClusters, rds:ModifyDBCluster (DocumentDB clusters use the RDS API namespace)\n- rds:CreateDBClusterParameterGroup, rds:DescribeDBClusterParameterGroups\nScope ElastiCache replication groups to arn:aws:elasticache:*:*:replicationgroup:loanflow-* and DocumentDB clusters to arn:aws:rds:*:*:cluster:loanflow-*."
+        },
+        {
+          "summary": "Add MSK Kafka cluster and topic management permissions to the policy",
+          "description": "Extend the policy with MSK actions:\n- kafka:CreateCluster, kafka:DeleteCluster, kafka:DescribeCluster, kafka:ListClusters\n- kafka:UpdateBrokerStorage, kafka:UpdateClusterConfiguration\n- kafka:CreateConfiguration, kafka:DescribeConfiguration\n- kafka:BatchAssociateScramSecret, kafka:BatchDisassociateScramSecret, kafka:ListScramSecrets\n- kafka:GetBootstrapBrokers\n- kafka:TagResource, kafka:ListTagsForResource\nScope cluster actions to resource ARNs matching arn:aws:kafka:*:*:cluster/loanflow-*/*. Note: Kafka topic creation (creating the four loan workflow topics) requires the Kafka CLI connecting to the broker, not the MSK API — the DevOps member needs network access to the broker, not an additional IAM action."
+        },
+        {
+          "summary": "Add S3 bucket management permissions scoped to loanflow- bucket names",
+          "description": "Extend the policy with S3 actions:\n- s3:CreateBucket, s3:DeleteBucket, s3:ListBucket, s3:GetBucketLocation\n- s3:PutBucketVersioning, s3:GetBucketVersioning\n- s3:PutBucketEncryption, s3:GetBucketEncryption\n- s3:PutBucketPolicy, s3:GetBucketPolicy, s3:DeleteBucketPolicy\n- s3:PutLifecycleConfiguration, s3:GetLifecycleConfiguration\n- s3:PutPublicAccessBlock, s3:GetPublicAccessBlock\n- s3:PutBucketLogging, s3:GetBucketLogging\n- s3:PutObject, s3:GetObject, s3:DeleteObject (for ALB access log delivery verification)\nScope bucket-level actions to arn:aws:s3:::loanflow-* and object-level actions to arn:aws:s3:::loanflow-*/*. Attach the policy to the loanflow-devops group and validate using the IAM Policy Simulator."
+        }
+      ]
+    },
+    {
+      "summary": "Create and attach observability, secrets management, and notification policy",
+      "description": "Create the custom IAM managed policy LoanFlowDevOpsObservabilityAndSecretsPolicy and attach it to the loanflow-devops group. This policy grants the permissions required to implement the CloudWatch logging and alarms epic, the Secrets Manager credentials epic, the SNS notification topic story, and the Lambda rotation function deployment. Permissions are scoped by resource naming convention: CloudWatch log groups matching /loanflow/*, Secrets Manager secrets matching /loanflow/*, SNS topics matching loanflow-*, and Lambda functions matching loanflow-*. KMS permissions are included for encrypted secrets and SNS topics.",
+      "labels": ["iam", "aws", "cloudwatch", "secrets-manager", "sns", "lambda", "ssm", "security"],
+      "priority": "High",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "DevOps member can create CloudWatch Log Groups and set retention policies",
+          "given": "LoanFlowDevOpsObservabilityAndSecretsPolicy is attached",
+          "when": "the DevOps user runs aws logs create-log-group --log-group-name /loanflow/dev/loan-service and aws logs put-retention-policy",
+          "then": "the log group is created with the specified retention policy and appears in CloudWatch Logs"
+        },
+        {
+          "scenario": "DevOps member can create and retrieve Secrets Manager secrets under /loanflow/*",
+          "given": "the policy is attached",
+          "when": "the DevOps user runs aws secretsmanager create-secret --name /loanflow/dev/loan-service/db-password",
+          "then": "the secret is created and the user can retrieve its value with get-secret-value"
+        },
+        {
+          "scenario": "DevOps member cannot access secrets outside the /loanflow/* path",
+          "given": "the Secrets Manager resource condition is applied",
+          "when": "the DevOps user attempts to run aws secretsmanager get-secret-value --secret-id /other-project/secret",
+          "then": "the action is denied by the resource ARN condition"
+        },
+        {
+          "scenario": "DevOps member can create CloudWatch alarms and wire them to SNS topics",
+          "given": "the policy is attached",
+          "when": "the DevOps user runs aws cloudwatch put-metric-alarm with --alarm-actions referencing a loanflow-* SNS topic ARN",
+          "then": "the alarm is created and the SNS topic ARN is listed in the alarm actions"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create LoanFlowDevOpsObservabilityAndSecretsPolicy with CloudWatch permissions",
+          "description": "Create a customer managed policy with the following CloudWatch actions:\n- logs:CreateLogGroup, logs:DeleteLogGroup, logs:DescribeLogGroups\n- logs:PutRetentionPolicy, logs:DeleteRetentionPolicy\n- logs:CreateLogStream, logs:PutLogEvents, logs:DescribeLogStreams\n- logs:PutMetricFilter, logs:DeleteMetricFilter, logs:DescribeMetricFilters\n- logs:StartQuery, logs:GetQueryResults, logs:StopQuery (for Logs Insights)\n- logs:PutSubscriptionFilter\n- cloudwatch:PutMetricAlarm, cloudwatch:DeleteAlarms, cloudwatch:DescribeAlarms\n- cloudwatch:GetMetricStatistics, cloudwatch:ListMetrics\n- cloudwatch:SetAlarmState (for testing alarm transitions)\n- cloudwatch:PutDashboard, cloudwatch:GetDashboard\nScope log group actions to arn:aws:logs:*:*:log-group:/loanflow/* and arn:aws:logs:*:*:log-group:/loanflow/*:*."
+        },
+        {
+          "summary": "Add Secrets Manager and SSM Parameter Store permissions to the policy",
+          "description": "Extend the policy with Secrets Manager actions:\n- secretsmanager:CreateSecret, secretsmanager:DeleteSecret, secretsmanager:DescribeSecret\n- secretsmanager:GetSecretValue, secretsmanager:PutSecretValue, secretsmanager:UpdateSecret\n- secretsmanager:RotateSecret, secretsmanager:CancelRotateSecret\n- secretsmanager:ListSecrets, secretsmanager:TagResource\nScope to arn:aws:secretsmanager:*:*:secret:/loanflow/*.\nAdd SSM Parameter Store actions:\n- ssm:PutParameter, ssm:GetParameter, ssm:GetParameters, ssm:GetParametersByPath\n- ssm:DeleteParameter, ssm:DescribeParameters\n- ssm:AddTagsToResource\nScope to arn:aws:ssm:*:*:parameter/loanflow/* for all parameter path operations."
+        },
+        {
+          "summary": "Add SNS topic management and Lambda rotation function permissions to the policy",
+          "description": "Extend the policy with SNS actions:\n- sns:CreateTopic, sns:DeleteTopic, sns:GetTopicAttributes, sns:SetTopicAttributes\n- sns:Subscribe, sns:Unsubscribe, sns:ListSubscriptionsByTopic\n- sns:Publish, sns:ListTopics\n- sns:TagResource\nScope to arn:aws:sns:*:*:loanflow-*.\nAdd Lambda actions for the Secrets Manager rotation function deployment:\n- lambda:CreateFunction, lambda:DeleteFunction, lambda:UpdateFunctionCode\n- lambda:GetFunction, lambda:ListFunctions, lambda:InvokeFunction\n- lambda:CreateEventSourceMapping\n- lambda:AddPermission, lambda:RemovePermission\n- lambda:UpdateFunctionConfiguration\n- lambda:TagResource\nScope Lambda actions to arn:aws:lambda:*:*:function:loanflow-* and to the AWS-managed rotation Lambda ARN from the Serverless Application Repository."
+        },
+        {
+          "summary": "Add KMS permissions for encrypted secrets and SNS topics",
+          "description": "Extend the policy with KMS actions required to use the aws/secretsmanager and aws/sns managed keys:\n- kms:GenerateDataKey, kms:Decrypt, kms:DescribeKey, kms:ListAliases\nScope to the aws/secretsmanager and aws/sns KMS key aliases using arn:aws:kms:*:*:alias/aws/secretsmanager and arn:aws:kms:*:*:alias/aws/sns. Do not grant kms:CreateKey or kms:PutKeyPolicy — the DevOps member uses AWS-managed keys only, not customer-managed KMS keys. Attach the completed policy to the loanflow-devops group and validate all six action groups using the IAM Policy Simulator."
+        }
+      ]
+    },
+    {
+      "summary": "Create scoped IAM policy for Jenkins and ECS role management with permission boundary",
+      "description": "Create the custom IAM managed policy LoanFlowDevOpsIAMScopedPolicy and attach it to the loanflow-devops group. This policy grants the minimum IAM permissions required for the DevOps member to create and manage the two IAM roles documented in the infrastructure epics — loanflow-jenkins-role and loanflow-ecs-execution-role — and their associated policies and instance profiles. A permission boundary is defined and enforced on any role the DevOps member creates, preventing them from creating a role with permissions beyond the boundary and thus preventing privilege escalation. The DevOps member cannot modify their own user, group, or the policies attached to them.",
+      "labels": ["iam", "aws", "security", "permission-boundary", "least-privilege"],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "DevOps member can create loanflow-jenkins-role with the defined permission boundary",
+          "given": "LoanFlowDevOpsIAMScopedPolicy is attached and the permission boundary policy exists",
+          "when": "the DevOps user runs aws iam create-role --role-name loanflow-jenkins-role --permissions-boundary <boundary-arn>",
+          "then": "the role is created with the boundary attached and the DevOps user can attach the Jenkins inline policy to it"
+        },
+        {
+          "scenario": "DevOps member cannot create a role without the permission boundary",
+          "given": "the IAM scoped policy requires the permission boundary on role creation",
+          "when": "the DevOps user attempts to create any IAM role without specifying the LoanFlowDevOpsPermissionBoundary ARN",
+          "then": "the create-role request is denied with an explicit Deny condition on iam:CreateRole"
+        },
+        {
+          "scenario": "DevOps member cannot modify their own IAM user or the loanflow-devops group",
+          "given": "the scoped policy explicitly denies self-modification",
+          "when": "the DevOps user attempts to attach a policy to their own user or to the loanflow-devops group",
+          "then": "the action is denied and the DevOps user cannot escalate their own permissions"
+        },
+        {
+          "scenario": "DevOps member can create and attach an EC2 instance profile for the Jenkins role",
+          "given": "the policy is attached",
+          "when": "the DevOps user runs aws iam create-instance-profile --instance-profile-name loanflow-jenkins-profile and aws iam add-role-to-instance-profile",
+          "then": "the instance profile is created and the Jenkins role is added to it successfully"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create the LoanFlowDevOpsPermissionBoundary managed policy",
+          "description": "Create a customer managed policy named LoanFlowDevOpsPermissionBoundary that defines the maximum permissions any role created by the DevOps member may possess. The boundary must include all actions from the four DevOps group policies (networking, data stores, observability, and secrets) plus the ECS and ECR actions needed by the Jenkins role, and the ECR pull and Secrets Manager read actions needed by the ECS execution role. It must explicitly exclude: iam:*, organizations:*, account:*, and any actions not required by the LoanFlow 360 infrastructure. This boundary is a ceiling — a role cannot exceed it regardless of what policies are attached to it."
+        },
+        {
+          "summary": "Create LoanFlowDevOpsIAMScopedPolicy with role and policy management permissions",
+          "description": "Create a customer managed policy with the following IAM actions, each scoped to resource ARNs matching loanflow-*:\n- iam:CreateRole, iam:DeleteRole, iam:GetRole, iam:ListRoles (resource: arn:aws:iam::*:role/loanflow-*)\n- iam:AttachRolePolicy, iam:DetachRolePolicy, iam:ListAttachedRolePolicies\n- iam:PutRolePolicy, iam:DeleteRolePolicy, iam:GetRolePolicy, iam:ListRolePolicies\n- iam:CreateInstanceProfile, iam:DeleteInstanceProfile, iam:GetInstanceProfile\n- iam:AddRoleToInstanceProfile, iam:RemoveRoleFromInstanceProfile\n- iam:PassRole (resource: arn:aws:iam::*:role/loanflow-*, required for ECS to assume the task execution role)\n- iam:CreatePolicy, iam:DeletePolicy, iam:GetPolicy, iam:ListPolicies (resource: arn:aws:iam::*:policy/LoanFlow*)\n- iam:CreatePolicyVersion, iam:DeletePolicyVersion, iam:GetPolicyVersion\nAdd a mandatory condition on iam:CreateRole requiring iam:PermissionsBoundary equal to the LoanFlowDevOpsPermissionBoundary ARN."
+        },
+        {
+          "summary": "Add explicit deny on self-modification and loanflow-devops group modification",
+          "description": "Add an explicit Deny statement to LoanFlowDevOpsIAMScopedPolicy covering:\n- iam:AttachUserPolicy, iam:DetachUserPolicy, iam:PutUserPolicy where the resource matches the DevOps user ARN\n- iam:AddUserToGroup, iam:RemoveUserFromGroup where the group is loanflow-devops\n- iam:AttachGroupPolicy, iam:DetachGroupPolicy, iam:PutGroupPolicy where the group is loanflow-devops\n- iam:DeletePolicy, iam:CreatePolicyVersion on any LoanFlowDevOps* policy\nThis explicit Deny cannot be overridden by any allow statement and prevents the DevOps member from modifying the access control model they operate within."
+        },
+        {
+          "summary": "Attach LoanFlowDevOpsIAMScopedPolicy to the group and run end-to-end access validation",
+          "description": "Attach the completed policy to the loanflow-devops group. Run an end-to-end validation using the IAM Policy Simulator covering: (1) creating loanflow-jenkins-role with the boundary — expect Allow; (2) creating a role without the boundary — expect Deny; (3) attaching an inline policy to the DevOps user — expect Deny; (4) attaching a policy to loanflow-devops group — expect Deny; (5) calling iam:PassRole for loanflow-ecs-execution-role in an ECS context — expect Allow. Document the simulator results as the acceptance evidence for this story."
+        }
+      ]
+    }
+  ]
+}

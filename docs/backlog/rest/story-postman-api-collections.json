@@ -1,0 +1,61 @@
+{
+  "summary": "Create Postman API collections for LoanFlow 360 REST API",
+  "description": "Create and maintain Postman collection files that cover all LoanFlow 360 REST API endpoints documented in <docs/api-reference.md>.\n\nTwo collections are required:\n- Gateway collection: all requests routed through the API Gateway at a single base URL\n- Direct-service collection: each service folder targets its own URL variable, bypassing the gateway\n\nBoth collections must include environment files for local development and dev/staging, a README documenting the contribution convention, and the PR template must be updated to enforce that Postman files stay in sync with <docs/api-reference.md>.\n\nAll request bodies, example responses, and auth patterns must match the API reference exactly.",
+  "labels": [
+    "api-documentation",
+    "postman",
+    "rest-api",
+    "developer-tooling",
+    "dx"
+  ],
+  "priority": "Medium",
+  "storyPoints": 3,
+  "acceptanceCriteria": [
+    {
+      "scenario": "Gateway collection covers all documented endpoints",
+      "given": "the gateway Postman collection is imported with the local environment selected",
+      "when": "a reviewer inspects the collection folders",
+      "then": "all endpoints from docs/api-reference.md are present, organised into folders matching the five service sections, with correct HTTP methods, path variables, query params, and example request bodies"
+    },
+    {
+      "scenario": "Direct-service collection routes each folder to the correct service",
+      "given": "the direct-service collection is imported with the local-direct environment selected",
+      "when": "a request is sent from any folder",
+      "then": "the request targets the correct per-service URL variable (identityServiceUrl, loanServiceUrl, documentServiceUrl, underwritingServiceUrl, auditServiceUrl) and does not route through the API Gateway"
+    },
+    {
+      "scenario": "Login request auto-captures the access token",
+      "given": "the Login request is executed and the server returns HTTP 200",
+      "when": "the response is received",
+      "then": "the test script stores accessToken and refreshToken as collection variables, and all subsequent authenticated requests in the same session use the captured token automatically"
+    },
+    {
+      "scenario": "PR checklist enforces Postman sync",
+      "given": "a developer opens a pull request that adds or changes an API endpoint",
+      "when": "they review the Author Checklist in the PR template",
+      "then": "a checklist item requires both docs/api-reference.md and the Postman collection files in docs/postman/ to be updated in the same PR"
+    }
+  ],
+  "tasks": [
+    {
+      "summary": "Create gateway Postman collection",
+      "description": "Create <docs/postman/loanflow-360.postman_collection.json> covering all endpoints from <docs/api-reference.md>. Organise into five service folders. Set collection-level bearer auth using {{accessToken}}. Add test scripts on Login and Create Application to auto-capture accessToken and applicationId."
+    },
+    {
+      "summary": "Create direct-service Postman collection",
+      "description": "Create <docs/postman/loanflow-360.direct-services.postman_collection.json> with per-service URL variables (identityServiceUrl, loanServiceUrl, documentServiceUrl, underwritingServiceUrl, auditServiceUrl). Add a Health Check request to each folder. Mirror all requests from the gateway collection."
+    },
+    {
+      "summary": "Create environment files for both collections",
+      "description": "Create four environment files in <docs/postman/>:\n- loanflow-360.local.postman_environment.json (gateway, localhost:8080)\n- loanflow-360.dev.postman_environment.json (gateway, dev hostname)\n- loanflow-360.local-direct.postman_environment.json (direct, localhost:8081–8085)\n- loanflow-360.dev-direct.postman_environment.json (direct, dev hostnames)\n\nMark loginPassword as type secret in all environments."
+    },
+    {
+      "summary": "Write Postman contribution README",
+      "description": "Create <docs/postman/README.md> documenting: file inventory, quickstart import steps, environment variable reference table, folder-to-service mapping, and step-by-step instructions for adding or editing an endpoint in both collections."
+    },
+    {
+      "summary": "Update PR template checklist",
+      "description": "Add a checklist item to <.github/PULL_REQUEST_TEMPLATE.md> Author Checklist requiring that docs/api-reference.md and the Postman collections in docs/postman/ are updated in the same PR when an endpoint is added or changed. Reference docs/postman/README.md."
+    }
+  ]
+}

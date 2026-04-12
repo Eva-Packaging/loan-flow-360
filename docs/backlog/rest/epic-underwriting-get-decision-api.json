@@ -1,0 +1,136 @@
+{
+  "summary": "Underwriting Service — Get Underwriting Decision REST API (4.1)",
+  "description": "Implement the GET /api/v1/underwriting/{applicationId} endpoint defined in api-reference.md section 4.1. This epic covers the full vertical slice for the read path: the UnderwritingDecisionResponse DTO, a scaffolded UnderwritingDecisionService returning hardcoded default values matching the api-reference example response, the UnderwritingController wiring the GET endpoint, and a RestControllerAdvice using Spring Boot's built-in ProblemDetail (RFC 7807) for structured error responses on 404 and invalid path variable types.\n\nNo custom API error response shape is introduced — error responses use ProblemDetail exclusively. Security enforcement (401/403) is delegated to the API Gateway and Spring Security, which are outside this epic's scope.",
+  "labels": [
+    "underwriting-service",
+    "rest-api",
+    "controller",
+    "dto",
+    "service-scaffold",
+    "problem-detail",
+    "sprint-3"
+  ],
+  "priority": "High",
+  "userType": "loan officer or admin authenticated through the API Gateway",
+  "functionality": "retrieve the underwriting outcome and review summary for a specific loan application via a stable REST endpoint",
+  "benefit": "so downstream consumers, the frontend dashboard, and manual reviewers can read the underwriting decision result for a given application without coupling directly to the underwriting database",
+  "stories": [
+    {
+      "summary": "Create UnderwritingDecisionResponse DTO and scaffold UnderwritingDecisionService",
+      "description": "Define the UnderwritingDecisionResponse DTO whose fields match the GET /api/v1/underwriting/{applicationId} example response from api-reference.md section 4.1. Scaffold the UnderwritingDecisionService interface and its initial implementation that returns hardcoded default values matching that example — enabling the controller to be built and integrated against a stable contract before real persistence logic is wired.\n\nExpected default response shape:\n\n```\n{\n  \"applicationId\": 50021,\n  \"decisionStatus\": \"APPROVED\",\n  \"decisionAt\": \"2026-03-24T16:02:11Z\",\n  \"decisionReason\": \"Income and debt ratio within policy thresholds\",\n  \"recommendedAmount\": 25000,\n  \"recommendedTermMonths\": 48,\n  \"manualReviewRequired\": false\n}\n```",
+      "labels": [
+        "underwriting-service",
+        "dto",
+        "service-scaffold"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "DTO fields match the api-reference 4.1 example response",
+          "given": "the UnderwritingDecisionResponse DTO is instantiated with all fields set",
+          "when": "the object is serialised to JSON by Jackson",
+          "then": "the output contains applicationId, decisionStatus, decisionAt, decisionReason, recommendedAmount, recommendedTermMonths, and manualReviewRequired with names and types matching the api-reference example"
+        },
+        {
+          "scenario": "Scaffold service returns default values for any applicationId",
+          "given": "no real persistence is wired and the service implementation is the scaffold",
+          "when": "getDecision is called with any applicationId",
+          "then": "the returned DTO carries the hardcoded defaults from the api-reference 4.1 example response with applicationId set to the requested value"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create UnderwritingDecisionResponse DTO",
+          "description": "Create com.loanflow.underwritingservice.dto.UnderwritingDecisionResponse with the following fields:\n\n- applicationId (long)\n- decisionStatus (String)\n- decisionAt (Instant)\n- decisionReason (String)\n- recommendedAmount (BigDecimal)\n- recommendedTermMonths (Integer)\n- manualReviewRequired (boolean)\n\nAnnotate with @Data, @Builder, @NoArgsConstructor, @AllArgsConstructor (Lombok)."
+        },
+        {
+          "summary": "Create UnderwritingDecisionService interface",
+          "description": "Create com.loanflow.underwritingservice.service.UnderwritingDecisionService with a single method:\n\nUnderwritingDecisionResponse getDecision(Long applicationId);"
+        },
+        {
+          "summary": "Scaffold UnderwritingDecisionServiceImpl returning hardcoded defaults",
+          "description": "Create com.loanflow.underwritingservice.service.UnderwritingDecisionServiceImpl annotated with @Service, implementing UnderwritingDecisionService.\n\ngetDecision must return a UnderwritingDecisionResponse built with:\n\n- applicationId: the incoming applicationId argument\n- decisionStatus: \"APPROVED\"\n- decisionAt: Instant.parse(\"2026-03-24T16:02:11Z\")\n- decisionReason: \"Income and debt ratio within policy thresholds\"\n- recommendedAmount: new BigDecimal(\"25000\")\n- recommendedTermMonths: 48\n- manualReviewRequired: false\n\nThis scaffold is intentionally replaced when real persistence and decision logic are implemented."
+        }
+      ]
+    },
+    {
+      "summary": "Implement UnderwritingController for GET /api/v1/underwriting/{applicationId}",
+      "description": "Wire the GET /api/v1/underwriting/{applicationId} endpoint defined in api-reference.md section 4.1. The controller delegates to UnderwritingDecisionService and returns 200 OK with the UnderwritingDecisionResponse body. Auth enforcement (401/403) is handled upstream by the API Gateway — no security annotations are added at this stage.",
+      "labels": [
+        "underwriting-service",
+        "controller",
+        "rest-api"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "GET request returns 200 with decision response body",
+          "given": "the service is running and UnderwritingDecisionServiceImpl is the active bean",
+          "when": "GET /api/v1/underwriting/50021 is called",
+          "then": "the response is 200 OK with Content-Type application/json and a body matching the api-reference 4.1 example response with applicationId 50021"
+        },
+        {
+          "scenario": "Non-numeric applicationId returns 400 ProblemDetail",
+          "given": "the controller and exception handler are wired",
+          "when": "GET /api/v1/underwriting/abc is called",
+          "then": "the response is 400 Bad Request with a ProblemDetail body containing a timestamp property and a detail describing the invalid path variable value"
+        },
+        {
+          "scenario": "Unknown applicationId returns 404 ProblemDetail when service throws UnderwritingCaseNotFoundException",
+          "given": "the service throws UnderwritingCaseNotFoundException for the requested applicationId",
+          "when": "GET /api/v1/underwriting/99999 is called",
+          "then": "the response is 404 Not Found with a ProblemDetail body containing title Not Found, a detail message referencing the applicationId, and a timestamp property"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create UnderwritingController",
+          "description": "Create com.loanflow.underwritingservice.controller.UnderwritingController annotated with @RestController and @RequestMapping(\"/api/v1/underwriting\").\n\nInject UnderwritingDecisionService via constructor injection.\n\nExpose:\n\n@GetMapping(\"/{applicationId}\")\npublic ResponseEntity<UnderwritingDecisionResponse> getUnderwritingDecision(@PathVariable Long applicationId)\n\nDelegate to underwritingDecisionService.getDecision(applicationId) and return ResponseEntity.ok(...).\n\nAdd a Javadoc comment documenting the auth requirements: LOAN_OFFICER and ADMIN have full access; APPLICANT may view final decision summary only (policy-dependent, enforced by API Gateway)."
+        }
+      ]
+    },
+    {
+      "summary": "Add UnderwritingExceptionHandler ControllerAdvice with ProblemDetail error responses",
+      "description": "Implement a @RestControllerAdvice that produces RFC 7807 ProblemDetail responses for error cases surfaced by the underwriting controller. No custom API error response shape is used — ProblemDetail is the sole error format. Handlers are required for UnderwritingCaseNotFoundException (404) and MethodArgumentTypeMismatchException (400 for non-numeric path variables).",
+      "labels": [
+        "underwriting-service",
+        "exception-handling",
+        "problem-detail"
+      ],
+      "priority": "Medium",
+      "storyPoints": 2,
+      "acceptanceCriteria": [
+        {
+          "scenario": "UnderwritingCaseNotFoundException produces 404 ProblemDetail",
+          "given": "the exception handler is registered and the service throws UnderwritingCaseNotFoundException",
+          "when": "the exception propagates to the handler",
+          "then": "the response status is 404, the body is a ProblemDetail with title Not Found, detail containing the applicationId, type about:blank, and a timestamp property set to the current instant"
+        },
+        {
+          "scenario": "MethodArgumentTypeMismatchException produces 400 ProblemDetail",
+          "given": "a non-numeric value is passed as the applicationId path variable",
+          "when": "Spring raises MethodArgumentTypeMismatchException",
+          "then": "the response status is 400, the body is a ProblemDetail with title Bad Request, detail identifying the invalid parameter name and value, and a timestamp property"
+        },
+        {
+          "scenario": "No custom error response class is introduced",
+          "given": "the exception handler implementation is reviewed",
+          "when": "all error response types are inspected",
+          "then": "only Spring Boot's built-in ProblemDetail is used — no custom ApiError or ErrorResponse wrapper classes exist"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create UnderwritingCaseNotFoundException",
+          "description": "Create com.loanflow.underwritingservice.exception.UnderwritingCaseNotFoundException extending RuntimeException.\n\nSingle constructor: UnderwritingCaseNotFoundException(Long applicationId) with message \"Underwriting case not found for application id: \" + applicationId."
+        },
+        {
+          "summary": "Create UnderwritingExceptionHandler ControllerAdvice",
+          "description": "Create com.loanflow.underwritingservice.exception.UnderwritingExceptionHandler annotated with @RestControllerAdvice.\n\nHandler methods:\n\n1. @ExceptionHandler(UnderwritingCaseNotFoundException.class)\n   - Returns ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage())\n   - Sets title to \"Not Found\", type to URI.create(\"about:blank\"), property \"timestamp\" to Instant.now()\n\n2. @ExceptionHandler(MethodArgumentTypeMismatchException.class)\n   - Returns ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, \"Invalid value '\" + ex.getValue() + \"' for parameter '\" + ex.getName() + \"'\")\n   - Sets title to \"Bad Request\", type to URI.create(\"about:blank\"), property \"timestamp\" to Instant.now()\n\nBoth methods return ProblemDetail directly — no ResponseEntity wrapper needed as Spring Boot 3.x handles status resolution from ProblemDetail automatically."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,311 @@
+{
+  "summary": "Automated Microservice Testing Pipeline — GitHub Actions CI",
+  "description": "Establish a layered automated testing pipeline that runs on every push to GitHub. Currently the only GitHub Actions workflow is pr-checks.yml, which validates PR title format only. All 7 backend services have contextLoads() tests only — no unit tests, no slice tests, no integration tests, and no coverage enforcement.\n\nThis epic introduces four test strategies aligned to the test pyramid, wired into a GitHub Actions CI workflow: unit tests (Mockito, no Spring context), controller slice tests (@WebMvcTest), repository slice tests (@DataJpaTest with H2), and full integration tests (@SpringBootTest with H2). JaCoCo is added to loanflow-parent so coverage is enforced uniformly across all services.\n\nloanflow-common must be installed before any service can compile. The CI workflow accounts for this with a build-common job that runs first and caches the ~/.m2 directory for downstream matrix jobs.\n\nloan-service and underwriting-service already have application-test.yaml configured with H2 in MySQL-compatibility mode and Flyway enabled. These are the first services to receive full test coverage. Other services receive context-load tests plus @WebMvcTest slices as controllers are added.",
+  "labels": [
+    "ci-cd",
+    "github-actions",
+    "testing",
+    "junit5",
+    "mockito",
+    "jacoco",
+    "loan-service",
+    "underwriting-service",
+    "loanflow-parent",
+    "sprint-2"
+  ],
+  "priority": "High",
+  "userType": "backend developer working across all services in the platform",
+  "functionality": "automate build, test, and coverage enforcement for all microservices on every push so regressions are caught before code is reviewed or merged",
+  "benefit": "so broken builds and test failures are surfaced immediately on push rather than discovered manually, and coverage gates prevent untested code from reaching main",
+  "stories": [
+    {
+      "summary": "Create GitHub Actions CI workflow with matrix build per service",
+      "description": "Create .github/workflows/ci.yml that triggers on push to any branch and on pull requests to main or any LF3-* epic branch. The workflow has three jobs:\n\n1. build-common — checks out the repo, installs loanflow-common into the local Maven cache, and uploads the ~/.m2 directory as a cache artifact keyed on the loanflow-parent and loanflow-common pom.xml hashes.\n\n2. unit-and-slice — runs after build-common. Uses a matrix over all 7 services. Each matrix job restores the Maven cache, then runs ./mvnw test -Dspring.profiles.active=test. Runs on every push to every branch.\n\n3. integration — runs after build-common, only on pull_request events. Matrix over loan-service and underwriting-service only (the two services with H2 test infrastructure). Runs ./mvnw verify -Dspring.profiles.active=test.\n\nServices without database dependencies (identity-service, gateway-service, document-service, notification-service, discovery-server) pass through the unit-and-slice job using their existing contextLoads() tests. They will gain slice tests as controllers are implemented.",
+      "labels": [
+        "ci-cd",
+        "github-actions",
+        "maven",
+        "loanflow-common"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Push to any branch triggers unit-and-slice job for all services",
+          "given": "a developer pushes a commit to any branch",
+          "when": "the push event fires",
+          "then": "the build-common job runs first and all 7 unit-and-slice matrix jobs run in parallel after it completes"
+        },
+        {
+          "scenario": "Pull request triggers integration job for DB-backed services",
+          "given": "a developer opens or pushes to a pull request targeting main or an LF3-* branch",
+          "when": "the pull_request event fires",
+          "then": "the integration matrix job runs for loan-service and underwriting-service in addition to the unit-and-slice jobs"
+        },
+        {
+          "scenario": "A failing test in one matrix service does not suppress the failure",
+          "given": "a test in loan-service fails",
+          "when": "the CI workflow runs",
+          "then": "the loan-service matrix job is marked failed and the overall workflow fails, while the other service jobs still run to completion"
+        },
+        {
+          "scenario": "Maven cache is restored from a prior run",
+          "given": "the pom.xml files for loanflow-parent and loanflow-common have not changed since the last run",
+          "when": "the unit-and-slice job starts",
+          "then": "the cache restore step reports a cache hit and no Maven dependencies are re-downloaded"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create .github/workflows/ci.yml",
+          "description": "Create .github/workflows/ci.yml with the following structure:\n\n```yaml\nname: CI\n\non:\n  push:\n    branches: ['**']\n  pull_request:\n    branches: [main, 'LF3-*']\n\njobs:\n  build-common:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-java@v4\n        with:\n          java-version: '17'\n          distribution: 'temurin'\n      - uses: actions/cache@v4\n        with:\n          path: ~/.m2/repository\n          key: m2-common-${{ hashFiles('backend/loanflow-parent/pom.xml', 'backend/loanflow-common/pom.xml') }}\n          restore-keys: m2-common-\n      - name: Install loanflow-common\n        run: cd backend/loanflow-common && ./mvnw clean install -DskipTests\n\n  unit-and-slice:\n    needs: build-common\n    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        service:\n          - loan-service\n          - identity-service\n          - gateway-service\n          - document-service\n          - underwriting-service\n          - notification-service\n          - discovery-server\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-java@v4\n        with:\n          java-version: '17'\n          distribution: 'temurin'\n      - uses: actions/cache@v4\n        with:\n          path: ~/.m2/repository\n          key: m2-common-${{ hashFiles('backend/loanflow-parent/pom.xml', 'backend/loanflow-common/pom.xml') }}\n          restore-keys: m2-common-\n      - name: Test ${{ matrix.service }}\n        run: cd backend/${{ matrix.service }} && ./mvnw test -Dspring.profiles.active=test\n\n  integration:\n    needs: build-common\n    if: github.event_name == 'pull_request'\n    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        service:\n          - loan-service\n          - underwriting-service\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-java@v4\n        with:\n          java-version: '17'\n          distribution: 'temurin'\n      - uses: actions/cache@v4\n        with:\n          path: ~/.m2/repository\n          key: m2-common-${{ hashFiles('backend/loanflow-parent/pom.xml', 'backend/loanflow-common/pom.xml') }}\n          restore-keys: m2-common-\n      - name: Verify ${{ matrix.service }}\n        run: cd backend/${{ matrix.service }} && ./mvnw verify -Dspring.profiles.active=test\n```"
+        }
+      ]
+    },
+    {
+      "summary": "Add JaCoCo code coverage enforcement to loanflow-parent",
+      "description": "Add the JaCoCo Maven plugin to backend/loanflow-parent/pom.xml so all services inherit it without declaring it themselves. Configure three executions: prepare-agent (instrument bytecode), report (generate HTML/XML report in target/site/jacoco), and check (fail the build when line coverage is below the minimum threshold).\n\nSet the initial threshold to 0.50 (50%) — a deliberately low bar that the existing contextLoads() tests already exceed — so the build does not break immediately. The threshold is raised incrementally as each story in this epic adds real tests. Coverage reports are uploaded as GitHub Actions artifacts so they are visible from the workflow run summary.",
+      "labels": [
+        "loanflow-parent",
+        "jacoco",
+        "coverage",
+        "ci-cd"
+      ],
+      "priority": "Medium",
+      "storyPoints": 2,
+      "acceptanceCriteria": [
+        {
+          "scenario": "mvnw verify generates a JaCoCo coverage report",
+          "given": "JaCoCo is configured in loanflow-parent and mvnw verify is run in loan-service",
+          "when": "the verify phase completes",
+          "then": "a coverage report is generated at target/site/jacoco/index.html"
+        },
+        {
+          "scenario": "Build fails when line coverage is below the configured threshold",
+          "given": "JaCoCo check is configured with minimum=0.50 and actual line coverage is 0.30",
+          "when": "mvnw verify runs",
+          "then": "the check execution fails the build with a coverage threshold violation message"
+        },
+        {
+          "scenario": "JaCoCo report is uploaded as a CI artifact",
+          "given": "the integration job runs to completion for loan-service",
+          "when": "the workflow finishes",
+          "then": "a JaCoCo HTML report is available as a downloadable artifact in the GitHub Actions run summary"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add JaCoCo plugin to loanflow-parent pom.xml",
+          "description": "Add the following plugin under <build><plugins> in backend/loanflow-parent/pom.xml:\n\n```xml\n<plugin>\n    <groupId>org.jacoco</groupId>\n    <artifactId>jacoco-maven-plugin</artifactId>\n    <version>0.8.11</version>\n    <executions>\n        <execution>\n            <id>prepare-agent</id>\n            <goals><goal>prepare-agent</goal></goals>\n        </execution>\n        <execution>\n            <id>report</id>\n            <phase>test</phase>\n            <goals><goal>report</goal></goals>\n        </execution>\n        <execution>\n            <id>check</id>\n            <goals><goal>check</goal></goals>\n            <configuration>\n                <rules>\n                    <rule>\n                        <limits>\n                            <limit>\n                                <counter>LINE</counter>\n                                <value>COVEREDRATIO</value>\n                                <minimum>0.50</minimum>\n                            </limit>\n                        </limits>\n                    </rule>\n                </rules>\n            </configuration>\n        </execution>\n    </executions>\n</plugin>\n```\n\nRun mvnw verify -DskipTests from backend/loan-service to confirm the plugin is inherited and no build errors occur."
+        },
+        {
+          "summary": "Upload JaCoCo report as GitHub Actions artifact in ci.yml",
+          "description": "Add the following step to the integration job in .github/workflows/ci.yml, after the verify step:\n\n```yaml\n- name: Upload coverage report\n  if: always()\n  uses: actions/upload-artifact@v4\n  with:\n    name: jacoco-${{ matrix.service }}\n    path: backend/${{ matrix.service }}/target/site/jacoco/\n    retention-days: 7\n```\n\nThe if: always() condition ensures the report is uploaded even when the coverage check fails, so the developer can inspect actual coverage before fixing the threshold gap."
+        }
+      ]
+    },
+    {
+      "summary": "Add unit tests for LoanApplicationServiceImpl using Mockito",
+      "description": "Write pure unit tests for com.loanflow.loanservice.service.impl.LoanApplicationServiceImpl. No Spring context is loaded — use @ExtendWith(MockitoExtension.class) and @Mock LoanApplicationRepository. Tests run in the unit-and-slice CI job on every push.\n\nCover the two methods added in the get-application-details epic: createApplication (stub) and getApplicationById. Focus on business logic branches: missing application (ResourceNotFoundException), ownership violation for APPLICANT role (AccessDeniedException), successful retrieval for APPLICANT owner, and successful retrieval for LOAN_OFFICER regardless of ownership.",
+      "labels": [
+        "loan-service",
+        "unit-test",
+        "mockito",
+        "service-layer"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Unit test suite runs without starting a Spring context",
+          "given": "LoanApplicationServiceImplTest is annotated with @ExtendWith(MockitoExtension.class)",
+          "when": "mvnw test is run",
+          "then": "all tests pass and no Spring application context is created during the test run"
+        },
+        {
+          "scenario": "getApplicationById throws ResourceNotFoundException when repository returns empty",
+          "given": "loanApplicationRepository.findById returns Optional.empty()",
+          "when": "getApplicationById is called",
+          "then": "ResourceNotFoundException is thrown with a message containing the applicationId"
+        },
+        {
+          "scenario": "getApplicationById throws AccessDeniedException when APPLICANT requests another user's application",
+          "given": "the repository returns a LoanApplication with applicantUserId=10 and callerUserId=99 with role APPLICANT",
+          "when": "getApplicationById is called",
+          "then": "AccessDeniedException is thrown and the response is never built"
+        },
+        {
+          "scenario": "getApplicationById returns response for the owning APPLICANT",
+          "given": "the repository returns a LoanApplication with applicantUserId=10 and callerUserId=10 with role APPLICANT",
+          "when": "getApplicationById is called",
+          "then": "an ApplicationDetailResponse is returned with applicationId, status, loanType, amount, termMonths, and annualIncome matching the entity"
+        },
+        {
+          "scenario": "getApplicationById skips ownership check for LOAN_OFFICER",
+          "given": "the repository returns a LoanApplication with applicantUserId=10 and callerUserId=99 with role LOAN_OFFICER",
+          "when": "getApplicationById is called",
+          "then": "an ApplicationDetailResponse is returned without AccessDeniedException"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create LoanApplicationServiceImplTest with Mockito",
+          "description": "Create backend/loan-service/src/test/java/com/loanflow/loanservice/service/impl/LoanApplicationServiceImplTest.java:\n\n```java\n@ExtendWith(MockitoExtension.class)\nclass LoanApplicationServiceImplTest {\n\n    @Mock\n    private LoanApplicationRepository loanApplicationRepository;\n\n    @InjectMocks\n    private LoanApplicationServiceImpl service;\n\n    // Helper: build a minimal LoanApplication entity\n    private LoanApplication buildApplication(Long id, Long applicantUserId) {\n        LoanApplication app = new LoanApplication();\n        app.setApplicationId(id);\n        app.setApplicantUserId(applicantUserId);\n        app.setStatus(LoanApplicationStatus.SUBMITTED);\n        app.setLoanType(com.loanflow.loanservice.entity.LoanType.PERSONAL);\n        app.setRequestedAmount(BigDecimal.valueOf(25000));\n        app.setTermMonths(48);\n        app.setAnnualIncome(BigDecimal.valueOf(92000));\n        app.setSubmittedAt(LocalDateTime.now());\n        return app;\n    }\n\n    @Test\n    void getApplicationById_throwsResourceNotFound_whenApplicationDoesNotExist() {\n        when(loanApplicationRepository.findById(99L)).thenReturn(Optional.empty());\n        assertThatThrownBy(() -> service.getApplicationById(99L, 1L, \"APPLICANT\"))\n            .isInstanceOf(ResourceNotFoundException.class)\n            .hasMessageContaining(\"99\");\n    }\n\n    @Test\n    void getApplicationById_throwsAccessDenied_whenApplicantRequestsOtherUsersApplication() {\n        when(loanApplicationRepository.findById(1L)).thenReturn(Optional.of(buildApplication(1L, 10L)));\n        assertThatThrownBy(() -> service.getApplicationById(1L, 99L, \"APPLICANT\"))\n            .isInstanceOf(AccessDeniedException.class);\n    }\n\n    @Test\n    void getApplicationById_returnsResponse_forOwningApplicant() {\n        when(loanApplicationRepository.findById(1L)).thenReturn(Optional.of(buildApplication(1L, 10L)));\n        ApplicationDetailResponse response = service.getApplicationById(1L, 10L, \"APPLICANT\");\n        assertThat(response.getApplicationId()).isEqualTo(1L);\n        assertThat(response.getStatus()).isEqualTo(LoanStatus.SUBMITTED);\n    }\n\n    @Test\n    void getApplicationById_returnsResponse_forLoanOfficerRegardlessOfOwnership() {\n        when(loanApplicationRepository.findById(1L)).thenReturn(Optional.of(buildApplication(1L, 10L)));\n        ApplicationDetailResponse response = service.getApplicationById(1L, 99L, \"LOAN_OFFICER\");\n        assertThat(response.getApplicationId()).isEqualTo(1L);\n    }\n}\n```\n\nImport AssertJ assertThatThrownBy and assertThat from org.assertj.core.api.Assertions. Import ResourceNotFoundException from com.loanflow.common.exception. Import AccessDeniedException from org.springframework.security.access."
+        }
+      ]
+    },
+    {
+      "summary": "Add @WebMvcTest controller slice tests for LoanApplicationController",
+      "description": "Write controller slice tests using @WebMvcTest for com.loanflow.loanservice.controller.LoanApplicationController. MockMvc exercises the full HTTP layer including Spring Security, request mapping, @Valid enforcement, and response serialisation, without loading JPA or Flyway.\n\nThe service layer is replaced with a @MockBean. JWT authentication is simulated using Spring Security Test's @WithMockUser or by injecting a mock JWT via SecurityMockMvcRequestPostProcessors.jwt().\n\nTest both the POST /api/v1/applications endpoint from the create epic and the GET /api/v1/applications/{applicationId} endpoint from the get-details epic.",
+      "labels": [
+        "loan-service",
+        "slice-test",
+        "spring-mvc",
+        "web-mvc-test",
+        "rbac"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Controller test loads only the web layer without JPA or Flyway",
+          "given": "LoanApplicationControllerTest is annotated with @WebMvcTest(LoanApplicationController.class)",
+          "when": "the test class loads",
+          "then": "no DataSource, EntityManager, or Flyway bean is created in the test context"
+        },
+        {
+          "scenario": "POST /api/v1/applications without JWT returns 401",
+          "given": "no Authorization header is included in the request",
+          "when": "MockMvc performs POST /api/v1/applications",
+          "then": "the response status is 401"
+        },
+        {
+          "scenario": "POST /api/v1/applications with LOAN_OFFICER role returns 403",
+          "given": "the JWT carries role LOAN_OFFICER",
+          "when": "MockMvc performs POST /api/v1/applications with a valid request body",
+          "then": "the response status is 403"
+        },
+        {
+          "scenario": "POST /api/v1/applications with null loanType returns 400",
+          "given": "the JWT carries role APPLICANT and the request body has a null loanType",
+          "when": "MockMvc performs the request",
+          "then": "the response status is 400 and the body contains the ApiErrorResponse shape"
+        },
+        {
+          "scenario": "GET /api/v1/applications/{id} with APPLICANT JWT returns 200 with mocked response",
+          "given": "the service mock returns an ApplicationDetailResponse and the JWT carries role APPLICANT",
+          "when": "MockMvc performs GET /api/v1/applications/50021",
+          "then": "the response status is 200 and the body contains applicationId 50021"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add spring-security-test dependency to loan-service pom.xml",
+          "description": "Add the following to backend/loan-service/pom.xml under <dependencies>. Scope is test. No version — managed by spring-boot-starter-parent:\n\n```xml\n<dependency>\n    <groupId>org.springframework.security</groupId>\n    <artifactId>spring-security-test</artifactId>\n    <scope>test</scope>\n</dependency>\n```\n\nThis provides SecurityMockMvcRequestPostProcessors.jwt() for building mock JWT tokens in slice tests."
+        },
+        {
+          "summary": "Create LoanApplicationControllerTest with @WebMvcTest",
+          "description": "Create backend/loan-service/src/test/java/com/loanflow/loanservice/controller/LoanApplicationControllerTest.java:\n\n```java\n@WebMvcTest(LoanApplicationController.class)\n@Import(SecurityConfig.class)\nclass LoanApplicationControllerTest {\n\n    @Autowired\n    private MockMvc mockMvc;\n\n    @MockBean\n    private LoanApplicationService loanApplicationService;\n\n    @Autowired\n    private ObjectMapper objectMapper;\n\n    // POST — no JWT → 401\n    @Test\n    void createApplication_noJwt_returns401() throws Exception {\n        mockMvc.perform(post(\"/api/v1/applications\")\n                .contentType(MediaType.APPLICATION_JSON)\n                .content(objectMapper.writeValueAsString(validRequest())))\n            .andExpect(status().isUnauthorized());\n    }\n\n    // POST — LOAN_OFFICER role → 403\n    @Test\n    void createApplication_loanOfficerRole_returns403() throws Exception {\n        mockMvc.perform(post(\"/api/v1/applications\")\n                .with(jwt().authorities(new SimpleGrantedAuthority(\"ROLE_LOAN_OFFICER\")))\n                .contentType(MediaType.APPLICATION_JSON)\n                .content(objectMapper.writeValueAsString(validRequest())))\n            .andExpect(status().isForbidden());\n    }\n\n    // POST — null loanType → 400\n    @Test\n    void createApplication_nullLoanType_returns400() throws Exception {\n        CreateLoanApplicationRequest badRequest = CreateLoanApplicationRequest.builder()\n            .loanType(null)\n            .amount(BigDecimal.valueOf(25000))\n            // ... other required fields\n            .build();\n        mockMvc.perform(post(\"/api/v1/applications\")\n                .with(jwt().authorities(new SimpleGrantedAuthority(\"ROLE_APPLICANT\")).claim(\"userId\", 1L).claim(\"roles\", List.of(\"APPLICANT\")))\n                .contentType(MediaType.APPLICATION_JSON)\n                .content(objectMapper.writeValueAsString(badRequest)))\n            .andExpect(status().isBadRequest())\n            .andExpect(jsonPath(\"$.status\").value(400));\n    }\n\n    // GET — APPLICANT owner → 200\n    @Test\n    void getApplicationById_owningApplicant_returns200() throws Exception {\n        when(loanApplicationService.getApplicationById(50021L, 10L, \"APPLICANT\"))\n            .thenReturn(ApplicationDetailResponse.builder().applicationId(50021L).build());\n\n        mockMvc.perform(get(\"/api/v1/applications/50021\")\n                .with(jwt().claim(\"userId\", 10L).claim(\"roles\", List.of(\"APPLICANT\"))))\n            .andExpect(status().isOk())\n            .andExpect(jsonPath(\"$.applicationId\").value(50021));\n    }\n\n    private CreateLoanApplicationRequest validRequest() {\n        return CreateLoanApplicationRequest.builder()\n            .loanType(LoanType.PERSONAL)\n            .amount(BigDecimal.valueOf(25000))\n            .termMonths(48)\n            .annualIncome(BigDecimal.valueOf(92000))\n            .employmentStatus(EmploymentStatus.FULL_TIME)\n            .applicantDetails(ApplicantDetailsRequest.builder()\n                .firstName(\"Devin\").lastName(\"Catuns\")\n                .email(\"devin@example.com\").phone(\"555-0147\")\n                .build())\n            .build();\n    }\n}\n```\n\nStatic imports: MockMvcRequestBuilders.post/get, MockMvcResultMatchers.status/jsonPath, SecurityMockMvcRequestPostProcessors.jwt, Mockito.when."
+        }
+      ]
+    },
+    {
+      "summary": "Add @DataJpaTest repository slice tests for LoanApplicationRepository",
+      "description": "Write JPA slice tests using @DataJpaTest for com.loanflow.loanservice.repository.LoanApplicationRepository. Spring loads only the JPA layer — no web, no service, no Kafka. Flyway runs migrations against H2 (already configured in application-test.yaml). Tests verify the custom query methods that the service layer depends on.\n\nUse @ActiveProfiles(\"test\") so the H2 datasource config in application-test.yaml is picked up automatically.",
+      "labels": [
+        "loan-service",
+        "slice-test",
+        "jpa",
+        "data-jpa-test",
+        "h2"
+      ],
+      "priority": "High",
+      "storyPoints": 2,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Repository test loads only the JPA layer",
+          "given": "LoanApplicationRepositoryTest is annotated with @DataJpaTest",
+          "when": "the test class loads",
+          "then": "no web layer, service beans, or Kafka configuration is created in the test context"
+        },
+        {
+          "scenario": "findByApplicationReference returns empty Optional for unknown reference",
+          "given": "no LoanApplication exists with the given reference",
+          "when": "findByApplicationReference is called",
+          "then": "Optional.empty() is returned"
+        },
+        {
+          "scenario": "findByApplicantUserId returns all applications for a given user",
+          "given": "two LoanApplications exist with applicantUserId=10 and one with applicantUserId=99",
+          "when": "findByApplicantUserId(10L) is called",
+          "then": "a list of exactly 2 applications is returned"
+        },
+        {
+          "scenario": "existsByApplicantUserIdAndLoanTypeAndStatusIn returns true for an active application",
+          "given": "a LoanApplication exists with applicantUserId=10, loanType=PERSONAL, status=SUBMITTED",
+          "when": "existsByApplicantUserIdAndLoanTypeAndStatusIn is called with matching criteria",
+          "then": "true is returned"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create LoanApplicationRepositoryTest with @DataJpaTest",
+          "description": "Create backend/loan-service/src/test/java/com/loanflow/loanservice/repository/LoanApplicationRepositoryTest.java:\n\n```java\n@DataJpaTest\n@ActiveProfiles(\"test\")\nclass LoanApplicationRepositoryTest {\n\n    @Autowired\n    private LoanApplicationRepository repository;\n\n    @Autowired\n    private TestEntityManager entityManager;\n\n    private LoanApplication persist(Long userId, LoanApplicationStatus status, LoanType loanType) {\n        LoanApplication app = new LoanApplication();\n        app.setApplicantUserId(userId);\n        app.setApplicationReference(UUID.randomUUID().toString());\n        app.setStatus(status);\n        app.setLoanType(loanType);\n        app.setRequestedAmount(BigDecimal.valueOf(25000));\n        app.setTermMonths(48);\n        app.setAnnualIncome(BigDecimal.valueOf(92000));\n        app.setEmploymentStatus(EmploymentStatus.FULL_TIME);\n        return entityManager.persistAndFlush(app);\n    }\n\n    @Test\n    void findByApplicationReference_returnsEmpty_forUnknownReference() {\n        assertThat(repository.findByApplicationReference(\"unknown-ref\")).isEmpty();\n    }\n\n    @Test\n    void findByApplicantUserId_returnsOnlyMatchingUser() {\n        persist(10L, LoanApplicationStatus.SUBMITTED, LoanType.PERSONAL);\n        persist(10L, LoanApplicationStatus.SUBMITTED, LoanType.AUTO);\n        persist(99L, LoanApplicationStatus.SUBMITTED, LoanType.PERSONAL);\n        assertThat(repository.findByApplicantUserId(10L)).hasSize(2);\n    }\n\n    @Test\n    void existsByApplicantUserIdAndLoanTypeAndStatusIn_returnsTrue_forActiveApplication() {\n        persist(10L, LoanApplicationStatus.SUBMITTED, LoanType.PERSONAL);\n        boolean exists = repository.existsByApplicantUserIdAndLoanTypeAndStatusIn(\n            10L, LoanType.PERSONAL, List.of(LoanApplicationStatus.SUBMITTED));\n        assertThat(exists).isTrue();\n    }\n\n    @Test\n    void existsByApplicantUserIdAndLoanTypeAndStatusIn_returnsFalse_whenNoneMatch() {\n        boolean exists = repository.existsByApplicantUserIdAndLoanTypeAndStatusIn(\n            10L, LoanType.PERSONAL, List.of(LoanApplicationStatus.SUBMITTED));\n        assertThat(exists).isFalse();\n    }\n}\n```"
+        }
+      ]
+    },
+    {
+      "summary": "Add @SpringBootTest integration test for loan-service POST and GET flows",
+      "description": "Write a full-context integration test for loan-service using @SpringBootTest with a random server port. The full Spring context loads — including JPA, Flyway, and the security filter chain — against the H2 in-memory database configured in application-test.yaml. TestRestTemplate or MockMvc exercises the complete HTTP-to-database path.\n\nThis test is the only one that runs in the integration CI job (on pull_request only). It verifies the end-to-end POST /api/v1/applications and GET /api/v1/applications/{id} flows through all layers.\n\nJWT tokens are generated locally using a HMAC secret defined in application-test.yaml (matching the dev profile secret) so no identity-service is required.",
+      "labels": [
+        "loan-service",
+        "integration-test",
+        "spring-boot-test",
+        "h2",
+        "end-to-end"
+      ],
+      "priority": "Medium",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Full Spring context loads against H2 without errors",
+          "given": "LoanServiceIntegrationTest is annotated with @SpringBootTest and @ActiveProfiles('test')",
+          "when": "the test class initialises",
+          "then": "the Spring context starts successfully with H2 as the datasource and all Flyway migrations applied"
+        },
+        {
+          "scenario": "POST /api/v1/applications with valid APPLICANT JWT persists and returns 201",
+          "given": "a valid APPLICANT JWT and a valid CreateLoanApplicationRequest body",
+          "when": "POST /api/v1/applications is called via TestRestTemplate",
+          "then": "the response status is 201 and the body contains applicationId, status SUBMITTED, and nextStep UPLOAD_REQUIRED_DOCUMENTS"
+        },
+        {
+          "scenario": "GET /api/v1/applications/{id} retrieves the previously created application",
+          "given": "an application was created via POST and its applicationId is known",
+          "when": "GET /api/v1/applications/{id} is called with the same APPLICANT JWT",
+          "then": "the response status is 200 and the body contains the matching applicationId and status"
+        },
+        {
+          "scenario": "GET /api/v1/applications/{id} returns 404 for an unknown id",
+          "given": "no application exists with id 99999",
+          "when": "GET /api/v1/applications/99999 is called with a valid JWT",
+          "then": "the response status is 404 and the body matches the ApiErrorResponse shape"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add JWT signing key to application-test.yaml for integration test token generation",
+          "description": "Add the following to backend/loan-service/src/test/resources/application-test.yaml so the security filter chain can validate locally generated test tokens:\n\n```yaml\nspring:\n  security:\n    oauth2:\n      resourceserver:\n        jwt:\n          secret: test-local-secret-key-min-32-chars\n```\n\nThis mirrors the dev profile secret approach already planned in SecurityConfig. Tests generate tokens using the same secret via a helper method."
+        },
+        {
+          "summary": "Create JwtTestHelper utility for generating test tokens",
+          "description": "Create backend/loan-service/src/test/java/com/loanflow/loanservice/util/JwtTestHelper.java:\n\n```java\npublic class JwtTestHelper {\n\n    private static final String SECRET = \"test-local-secret-key-min-32-chars\";\n\n    public static String generateToken(Long userId, String role) {\n        SecretKey key = Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8));\n        return Jwts.builder()\n            .subject(String.valueOf(userId))\n            .claim(\"userId\", userId)\n            .claim(\"roles\", List.of(role))\n            .issuedAt(new Date())\n            .expiration(new Date(System.currentTimeMillis() + 3600_000))\n            .signWith(key)\n            .compact();\n    }\n}\n```\n\nAdd jjwt-api, jjwt-impl, and jjwt-jackson to loan-service pom.xml with test scope:\n\n```xml\n<dependency><groupId>io.jsonwebtoken</groupId><artifactId>jjwt-api</artifactId><version>0.12.6</version><scope>test</scope></dependency>\n<dependency><groupId>io.jsonwebtoken</groupId><artifactId>jjwt-impl</artifactId><version>0.12.6</version><scope>test</scope></dependency>\n<dependency><groupId>io.jsonwebtoken</groupId><artifactId>jjwt-jackson</artifactId><version>0.12.6</version><scope>test</scope></dependency>\n```"
+        },
+        {
+          "summary": "Create LoanServiceIntegrationTest with @SpringBootTest",
+          "description": "Create backend/loan-service/src/test/java/com/loanflow/loanservice/LoanServiceIntegrationTest.java:\n\n```java\n@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)\n@ActiveProfiles(\"test\")\nclass LoanServiceIntegrationTest {\n\n    @Autowired\n    private TestRestTemplate restTemplate;\n\n    private HttpHeaders applicantHeaders() {\n        String token = JwtTestHelper.generateToken(10L, \"APPLICANT\");\n        HttpHeaders headers = new HttpHeaders();\n        headers.setBearerAuth(token);\n        headers.setContentType(MediaType.APPLICATION_JSON);\n        return headers;\n    }\n\n    @Test\n    void createAndRetrieveApplication_fullFlow() {\n        CreateLoanApplicationRequest request = /* valid request */ ...;\n\n        // POST → 201\n        ResponseEntity<CreateLoanApplicationResponse> createResp = restTemplate.exchange(\n            \"/api/v1/applications\",\n            HttpMethod.POST,\n            new HttpEntity<>(request, applicantHeaders()),\n            CreateLoanApplicationResponse.class);\n        assertThat(createResp.getStatusCode()).isEqualTo(HttpStatus.CREATED);\n        Long appId = createResp.getBody().getApplicationId();\n\n        // GET → 200\n        ResponseEntity<ApplicationDetailResponse> getResp = restTemplate.exchange(\n            \"/api/v1/applications/\" + appId,\n            HttpMethod.GET,\n            new HttpEntity<>(applicantHeaders()),\n            ApplicationDetailResponse.class);\n        assertThat(getResp.getStatusCode()).isEqualTo(HttpStatus.OK);\n        assertThat(getResp.getBody().getApplicationId()).isEqualTo(appId);\n    }\n\n    @Test\n    void getApplication_unknownId_returns404() {\n        ResponseEntity<String> resp = restTemplate.exchange(\n            \"/api/v1/applications/99999\",\n            HttpMethod.GET,\n            new HttpEntity<>(applicantHeaders()),\n            String.class);\n        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);\n    }\n}\n```"
+        }
+      ]
+    }
+  ]
+}

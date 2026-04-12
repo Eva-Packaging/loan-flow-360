@@ -1,0 +1,227 @@
+{
+  "summary": "Loan Application Service — Get Application Details Endpoint",
+  "description": "Implement the GET /api/v1/applications/{applicationId} endpoint in loan-service. This covers all work needed to retrieve full application details for a specific loan by ID: fixing the existing DocumentSummary typo in loanflow-common, adding the getApplicationById method to the service interface and a stub implementation that fetches from the database and enforces ownership for APPLICANTs, wiring the controller endpoint with role-scoped access, extending GlobalExceptionHandler with a 404 handler, and adding Redis caching so repeated reads are served from cache rather than hitting the database.\n\nApplicationDetailResponse, ApplicantDetailsSummary, and DocumentSummary already exist in loanflow-common. LoanApplicationRepository already has findByApplicantUserId. SecurityConfig and GlobalExceptionHandler were scaffolded in the create-loan-application epic — this epic extends them.\n\nCommon exceptions are centralised in loanflow-common under com.loanflow.common.exception so any service can import and throw them without duplicating exception class definitions. ResourceNotFoundException is defined there and imported by loan-service.",
+  "labels": [
+    "loan-service",
+    "loanflow-common",
+    "rest-api",
+    "spring-mvc",
+    "rbac",
+    "redis",
+    "caching",
+    "sprint-2",
+    "module-3"
+  ],
+  "priority": "High",
+  "userType": "backend developer owning the Loan Application Service",
+  "functionality": "implement the get application details endpoint with ownership enforcement, a 404 handler, and Redis caching so the documented GET /api/v1/applications/{applicationId} contract is fully exercisable",
+  "benefit": "so authenticated users can retrieve a full loan application by ID with correct role-scoped access control and cached reads before business logic implementation begins",
+  "stories": [
+    {
+      "summary": "Fix DocumentSummary typo and verify ApplicationDetailResponse shape in loanflow-common",
+      "description": "DocumentSummary in loanflow-common has a field named 'verfied' (missing 'i'). The API reference and ApplicationDetailResponse both expect 'verified'. Fix the typo so the serialised JSON key matches the documented response shape.\n\nAlso confirm that ApplicationDetailResponse contains every top-level field in the API reference 2.2 response: applicationId, status, loanType, amount, termMonths, annualIncome, submittedAt, applicantDetails, documentSummary. The class already exists — this story validates it and corrects the only known gap.",
+      "labels": [
+        "loanflow-common",
+        "dto",
+        "response",
+        "bug-fix"
+      ],
+      "priority": "High",
+      "storyPoints": 1,
+      "acceptanceCriteria": [
+        {
+          "scenario": "DocumentSummary serialises with the correct 'verified' field name",
+          "given": "a DocumentSummary is built with required=4, uploaded=4, verified=4",
+          "when": "Jackson serialises the object",
+          "then": "the JSON contains the key 'verified' not 'verfied'"
+        },
+        {
+          "scenario": "ApplicationDetailResponse serialises all API reference 2.2 fields",
+          "given": "a fully populated ApplicationDetailResponse is built with all fields set",
+          "when": "Jackson serialises the object",
+          "then": "the JSON contains applicationId, status, loanType, amount, termMonths, annualIncome, submittedAt, applicantDetails, and documentSummary at the correct nesting levels"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Fix 'verfied' typo to 'verified' in DocumentSummary",
+          "description": "Edit backend/loanflow-common/src/main/java/com/loanflow/common/dto/application/response/DocumentSummary.java.\n\nRename the field 'verfied' to 'verified'. The field type remains int. Update the @Builder and constructor accordingly — Lombok regenerates these so only the field declaration needs changing.\n\nRun mvnw clean install -DskipTests from backend/loanflow-common to confirm the module compiles after the rename."
+        }
+      ]
+    },
+    {
+      "summary": "Add getApplicationById to LoanApplicationService with ownership enforcement and 404 handling",
+      "description": "Add the getApplicationById method to the LoanApplicationService interface and implement it in LoanApplicationServiceImpl. The implementation must:\n\n1. Look up the LoanApplication by applicationId using the existing JpaRepository findById — throw ResourceNotFoundException if not found.\n2. For callers with role APPLICANT, verify that the application's applicantUserId matches the caller's userId — throw AccessDeniedException if not.\n3. Build and return an ApplicationDetailResponse from the entity. The documentSummary is stubbed with zeros for now (document counts come from document-service in a later sprint).\n\nResourceNotFoundException is defined in loanflow-common under com.loanflow.common.exception — it is not created in loan-service. Import it from loanflow-common. Add a @ExceptionHandler for it in the existing GlobalExceptionHandler that returns 404.",
+      "labels": [
+        "loan-service",
+        "loanflow-common",
+        "service-layer",
+        "exception-handling",
+        "rbac",
+        "jpa"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "getApplicationById throws ResourceNotFoundException for unknown applicationId",
+          "given": "no LoanApplication exists with the requested applicationId",
+          "when": "getApplicationById is called",
+          "then": "ResourceNotFoundException is thrown with a message identifying the applicationId"
+        },
+        {
+          "scenario": "getApplicationById throws AccessDeniedException when APPLICANT requests another user's application",
+          "given": "a LoanApplication exists with applicantUserId 10 and the caller's userId is 99 with role APPLICANT",
+          "when": "getApplicationById is called",
+          "then": "AccessDeniedException is thrown and the application data is not returned"
+        },
+        {
+          "scenario": "getApplicationById returns ApplicationDetailResponse for the owning APPLICANT",
+          "given": "a LoanApplication exists with applicantUserId 10 and the caller's userId is 10 with role APPLICANT",
+          "when": "getApplicationById is called",
+          "then": "an ApplicationDetailResponse is returned with applicationId, status, loanType, amount, termMonths, annualIncome, submittedAt, applicantDetails, and a stubbed documentSummary with zeros"
+        },
+        {
+          "scenario": "getApplicationById returns ApplicationDetailResponse for LOAN_OFFICER without ownership check",
+          "given": "a LoanApplication exists with applicantUserId 10 and the caller has role LOAN_OFFICER",
+          "when": "getApplicationById is called",
+          "then": "an ApplicationDetailResponse is returned without an ownership check being applied"
+        },
+        {
+          "scenario": "GlobalExceptionHandler returns 404 with standard error payload for ResourceNotFoundException",
+          "given": "the controller calls getApplicationById and ResourceNotFoundException is thrown",
+          "when": "the exception propagates to GlobalExceptionHandler",
+          "then": "a 404 response is returned containing timestamp, status 404, error 'Not Found', message, and path fields"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create ResourceNotFoundException in loanflow-common",
+          "description": "Create com.loanflow.common.exception.ResourceNotFoundException in loanflow-common. The com.loanflow.common.exception package already exists (package-info.java is present):\n\npublic class ResourceNotFoundException extends RuntimeException {\n    public ResourceNotFoundException(String message) {\n        super(message);\n    }\n}\n\nDefining it here allows any service that depends on loanflow-common to import and throw it without duplicating the class. Run mvnw clean install -DskipTests from backend/loanflow-common after adding the class."
+        },
+        {
+          "summary": "Add 404 handler for ResourceNotFoundException to GlobalExceptionHandler",
+          "description": "In com.loanflow.loanservice.exception.GlobalExceptionHandler add:\n\n@ExceptionHandler(ResourceNotFoundException.class)\npublic ResponseEntity<ApiErrorResponse> handleNotFound(\n        ResourceNotFoundException ex, HttpServletRequest request) {\n    return ResponseEntity.status(HttpStatus.NOT_FOUND)\n        .body(new ApiErrorResponse(\n            Instant.now(),\n            HttpStatus.NOT_FOUND.value(),\n            \"Not Found\",\n            ex.getMessage(),\n            request.getRequestURI()\n        ));\n}\n\nImport ResourceNotFoundException from com.loanflow.common.exception."
+        },
+        {
+          "summary": "Add getApplicationById to LoanApplicationService interface",
+          "description": "Add the following method signature to com.loanflow.loanservice.service.LoanApplicationService:\n\nApplicationDetailResponse getApplicationById(Long applicationId, Long callerUserId, String callerRole);\n\nImport ApplicationDetailResponse from com.loanflow.common.dto.application.response."
+        },
+        {
+          "summary": "Implement getApplicationById in LoanApplicationServiceImpl",
+          "description": "Add the following to com.loanflow.loanservice.service.impl.LoanApplicationServiceImpl:\n\n@Override\npublic ApplicationDetailResponse getApplicationById(\n        Long applicationId, Long callerUserId, String callerRole) {\n\n    LoanApplication application = loanApplicationRepository\n        .findById(applicationId)\n        .orElseThrow(() -> new ResourceNotFoundException(\n            \"Application not found with id: \" + applicationId));\n\n    if (\"APPLICANT\".equals(callerRole)\n            && !application.getApplicantUserId().equals(callerUserId)) {\n        throw new AccessDeniedException(\n            \"Access denied to application: \" + applicationId);\n    }\n\n    return ApplicationDetailResponse.builder()\n        .applicationId(application.getApplicationId())\n        .status(LoanStatus.valueOf(application.getStatus().name()))\n        .loanType(LoanType.valueOf(application.getLoanType().name()))\n        .amount(application.getRequestedAmount())\n        .termMonths(application.getTermMonths())\n        .annualIncome(application.getAnnualIncome())\n        .submittedAt(application.getSubmittedAt().toInstant(ZoneOffset.UTC))\n        .applicantDetails(ApplicantDetailsSummary.builder()\n            .firstName(\"\")\n            .lastName(\"\")\n            .email(\"\")\n            .build())\n        .documentSummary(DocumentSummary.builder()\n            .required(0)\n            .uploaded(0)\n            .verified(0)\n            .build())\n        .build();\n}\n\nApplicantDetailsSummary is stubbed with empty strings — applicant identity data is resolved from identity-service in a later sprint. Import LoanStatus and LoanType from com.loanflow.common.dto.enums. Import ResourceNotFoundException from com.loanflow.common.exception. Import AccessDeniedException from org.springframework.security.access."
+        }
+      ]
+    },
+    {
+      "summary": "Implement GET /api/v1/applications/{applicationId} controller endpoint",
+      "description": "Add the getApplicationById method to LoanApplicationController. The endpoint must:\n\n1. Accept the applicationId path variable.\n2. Extract callerUserId and callerRole from the JWT claims.\n3. Delegate to LoanApplicationService.getApplicationById.\n4. Return 200 with the ApplicationDetailResponse body.\n\nSecurity is already enforced by SecurityConfig from the create-loan-application epic — all authenticated requests reach the controller. Ownership and role checks are enforced in the service layer.",
+      "labels": [
+        "loan-service",
+        "rest-api",
+        "spring-mvc",
+        "rbac"
+      ],
+      "priority": "High",
+      "storyPoints": 2,
+      "acceptanceCriteria": [
+        {
+          "scenario": "GET /api/v1/applications/{applicationId} without JWT returns 401",
+          "given": "a request is sent to GET /api/v1/applications/50021 with no Authorization header",
+          "when": "the request reaches the security filter chain",
+          "then": "a 401 Unauthorized response is returned"
+        },
+        {
+          "scenario": "GET /api/v1/applications/{applicationId} returns 404 for unknown applicationId",
+          "given": "no application exists with id 99999 and a valid JWT is provided",
+          "when": "GET /api/v1/applications/99999 is called",
+          "then": "a 404 response is returned with the standard ApiErrorResponse payload"
+        },
+        {
+          "scenario": "GET /api/v1/applications/{applicationId} returns 403 when APPLICANT requests another user's application",
+          "given": "a LoanApplication exists for userId 10 and the caller's JWT carries userId 99 with role APPLICANT",
+          "when": "GET /api/v1/applications/{applicationId} is called",
+          "then": "a 403 Forbidden response is returned"
+        },
+        {
+          "scenario": "GET /api/v1/applications/{applicationId} returns 200 with ApplicationDetailResponse for the owning APPLICANT",
+          "given": "a LoanApplication exists for userId 10 and the caller's JWT carries userId 10 with role APPLICANT",
+          "when": "GET /api/v1/applications/{applicationId} is called",
+          "then": "a 200 response is returned with a body containing applicationId, status, loanType, amount, termMonths, annualIncome, submittedAt, applicantDetails, and documentSummary"
+        },
+        {
+          "scenario": "GET /api/v1/applications/{applicationId} returns 200 for LOAN_OFFICER regardless of ownership",
+          "given": "a LoanApplication exists for userId 10 and the caller's JWT carries any userId with role LOAN_OFFICER",
+          "when": "GET /api/v1/applications/{applicationId} is called",
+          "then": "a 200 response is returned with the ApplicationDetailResponse body"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add GET /api/v1/applications/{applicationId} method to LoanApplicationController",
+          "description": "Add the following method to com.loanflow.loanservice.controller.LoanApplicationController:\n\n@GetMapping(\"/{applicationId}\")\npublic ResponseEntity<ApplicationDetailResponse> getApplicationById(\n        @PathVariable Long applicationId,\n        @AuthenticationPrincipal Jwt jwt) {\n    Long callerUserId = jwt.getClaim(\"userId\");\n    String callerRole = jwt.<List<String>>getClaim(\"roles\").get(0);\n    return ResponseEntity.ok(\n        loanApplicationService.getApplicationById(applicationId, callerUserId, callerRole));\n}\n\nImport ApplicationDetailResponse from com.loanflow.common.dto.application.response."
+        },
+        {
+          "summary": "Smoke test the GET endpoint via dev profile",
+          "description": "Start loan-service with the dev profile and confirm:\n\n1. GET /api/v1/applications/50021 with no JWT returns 401.\n2. GET /api/v1/applications/99999 with a valid JWT returns 404 with ApiErrorResponse.\n3. GET /api/v1/applications/{id} with an APPLICANT JWT for a different user returns 403.\n4. GET /api/v1/applications/{id} with the owning APPLICANT JWT returns 200 with a body containing applicationId, status, loanType, amount, termMonths, annualIncome, submittedAt, applicantDetails, and documentSummary."
+        }
+      ]
+    },
+    {
+      "summary": "Cache GET /api/v1/applications/{applicationId} responses in Redis",
+      "description": "Add Redis caching to LoanApplicationServiceImpl.getApplicationById so that repeated reads for the same applicationId are served from cache rather than hitting the database. Cache entries must be evicted when the application is updated.\n\nAdd spring-boot-starter-data-redis to loan-service pom.xml. Configure a CacheManager bean with a dedicated TTL for the application-details cache. Annotate getApplicationById with @Cacheable and any status-update method with @CacheEvict. Configure the Redis connection in application-dev.yaml.",
+      "labels": [
+        "loan-service",
+        "redis",
+        "caching",
+        "performance"
+      ],
+      "priority": "Medium",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "Second call to getApplicationById for the same applicationId does not hit the database",
+          "given": "getApplicationById has been called once for applicationId 50021 and the result is in cache",
+          "when": "getApplicationById is called again for applicationId 50021",
+          "then": "the repository findById is not invoked and the cached ApplicationDetailResponse is returned"
+        },
+        {
+          "scenario": "Cache entry is evicted when the application status is updated",
+          "given": "a cached entry exists for applicationId 50021",
+          "when": "the application status is updated via the service layer",
+          "then": "the cache entry for applicationId 50021 is removed so the next read fetches from the database"
+        },
+        {
+          "scenario": "Cache miss for unknown applicationId still throws ResourceNotFoundException",
+          "given": "no cache entry and no database row exist for applicationId 99999",
+          "when": "getApplicationById is called for applicationId 99999",
+          "then": "ResourceNotFoundException is thrown and nothing is written to cache"
+        },
+        {
+          "scenario": "loan-service starts with Redis unavailable and falls back gracefully",
+          "given": "Redis is not running and spring.cache.type is set to 'none' in application-dev.yaml",
+          "when": "the Spring context starts",
+          "then": "the context loads without error and getApplicationById serves responses directly from the database"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add spring-boot-starter-data-redis to loan-service pom.xml",
+          "description": "Add the following to backend/loan-service/pom.xml under <dependencies>. No version attribute — managed by loanflow-parent:\n\n<dependency>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-data-redis</artifactId>\n</dependency>"
+        },
+        {
+          "summary": "Create CacheConfig bean with a dedicated TTL for application-details",
+          "description": "Create com.loanflow.loanservice.config.CacheConfig in loan-service:\n\n@Configuration\n@EnableCaching\npublic class CacheConfig {\n\n    public static final String APPLICATION_DETAILS_CACHE = \"application-details\";\n\n    @Bean\n    public RedisCacheManager cacheManager(RedisConnectionFactory factory) {\n        RedisCacheConfiguration defaultConfig = RedisCacheConfiguration.defaultCacheConfig()\n            .entryTtl(Duration.ofMinutes(5))\n            .disableCachingNullValues()\n            .serializeValuesWith(RedisSerializationContext.SerializationPair\n                .fromSerializer(new GenericJackson2JsonRedisSerializer()));\n\n        return RedisCacheManager.builder(factory)\n            .withCacheConfiguration(APPLICATION_DETAILS_CACHE, defaultConfig)\n            .build();\n    }\n}"
+        },
+        {
+          "summary": "Annotate getApplicationById with @Cacheable and status-update method with @CacheEvict",
+          "description": "In com.loanflow.loanservice.service.impl.LoanApplicationServiceImpl:\n\n1. Add @Cacheable to getApplicationById:\n\n@Cacheable(value = CacheConfig.APPLICATION_DETAILS_CACHE, key = \"#applicationId\")\n@Override\npublic ApplicationDetailResponse getApplicationById(\n        Long applicationId, Long callerUserId, String callerRole) { ... }\n\n2. Add @CacheEvict to any existing or future method that updates application status:\n\n@CacheEvict(value = CacheConfig.APPLICATION_DETAILS_CACHE, key = \"#applicationId\")\npublic void updateApplicationStatus(Long applicationId, ...) { ... }\n\nIf updateApplicationStatus does not yet exist, add a stub method signature with the @CacheEvict annotation so the eviction wiring is in place before the update business logic is implemented."
+        },
+        {
+          "summary": "Configure Redis connection in application-dev.yaml",
+          "description": "Add the following to backend/loan-service/src/main/resources/application-dev.yaml:\n\nspring:\n  data:\n    redis:\n      host: localhost\n      port: 6379\n  cache:\n    type: redis\n\nFor local runs without Redis, developers can override spring.cache.type=none to disable caching without changing application code."
+        }
+      ]
+    }
+  ]
+}
