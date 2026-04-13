@@ -2,12 +2,10 @@
 <!-- Brief summary of what changed -->
 
 ## Why
-<!-- Jira ticket: https://your-org.atlassian.net/browse/SCRUM-### -->
 
 ## How to Test
 <!-- Steps a reviewer can follow to verify the change locally -->
 1.
-2.
 
 ---
 
@@ -19,7 +17,8 @@
 - [ ] New logic is covered by tests (or a Jira sub-task exists for test coverage)
 - [ ] No debug output, dead code, or untracked TODO comments left in
 - [ ] No secrets or credentials committed — use `.env.example` for new environment keys
-- [ ] PR title follows the `SCRUM-### Description` format
+- [ ] If an endpoint was added or changed: `docs/api-reference.md` and the Postman collections in `docs/postman/` are updated in this PR (see `docs/postman/README.md`)
+- [ ] PR title follows the `LF3-### Description` format
 - [ ] PR is targeting the correct base branch (epic branch for stories/tasks, `main` for epics)
 
 ## Reviewer Checklist
