@@ -12,5 +12,5 @@ import lombok.NoArgsConstructor;
 public class DocumentSummary {
     private int required;
     private int uploaded;
-    private int verfied;
+    private int verified;
 }
