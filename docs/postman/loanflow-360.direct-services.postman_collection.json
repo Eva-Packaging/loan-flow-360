@@ -1,0 +1,756 @@
+{
+  "info": {
+    "_postman_id": "lf360-collection-direct-v1",
+    "name": "LoanFlow 360 — Direct Services",
+    "description": "LoanFlow 360 — direct service access, bypassing the API Gateway.\n\nEach folder targets its own service URL variable. Select a `Direct Services` environment before running.\n\n**Service → variable mapping**\n- Identity Service (8081) → `{{identityServiceUrl}}`\n- Loan Application Service (8082) → `{{loanServiceUrl}}`\n- Document Service (8083) → `{{documentServiceUrl}}`\n- Underwriting Service (8084) → `{{underwritingServiceUrl}}`\n- Notification/Audit Service (8085) → `{{auditServiceUrl}}`\n\n**Auth note:** JWT validation is still enforced by Spring Security on each service. Run **Login** first — the test script captures `accessToken` automatically and all authenticated requests inherit it via collection-level bearer auth.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string",
+      "description": "JWT access token — populated automatically by the Login request test script"
+    },
+    {
+      "key": "refreshToken",
+      "value": "",
+      "type": "string",
+      "description": "Refresh token — populated automatically by the Login request test script"
+    },
+    {
+      "key": "applicationId",
+      "value": "50021",
+      "type": "string",
+      "description": "Loan application ID — populated automatically by Create Loan Application test script"
+    },
+    {
+      "key": "documentId",
+      "value": "88041",
+      "type": "string",
+      "description": "Document ID — populated automatically by Upload Document Metadata test script"
+    },
+    {
+      "key": "notificationId",
+      "value": "ntf-4001",
+      "type": "string",
+      "description": "Notification ID — set manually or from Get Notification History response"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Identity & Access",
+      "description": "Targets the Identity Service directly at `{{identityServiceUrl}}` (default: localhost:8081).",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('accessToken', body.accessToken);",
+                  "    pm.collectionVariables.set('refreshToken', body.refreshToken ?? '');",
+                  "    console.log('accessToken captured');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{loginUsername}}\",\n  \"password\": \"{{loginPassword}}\"\n}"
+            },
+            "url": {
+              "raw": "{{identityServiceUrl}}/api/v1/auth/login",
+              "host": ["{{identityServiceUrl}}"],
+              "path": ["api", "v1", "auth", "login"]
+            },
+            "description": "Authenticates a user and returns a JWT access token. Public — no auth required.\n\nThe test script stores `accessToken` and `refreshToken` as collection variables automatically."
+          },
+          "response": [
+            {
+              "name": "200 OK — Loan Officer",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"accessToken\": \"eyJhbGciOiJIUzI1NiJ9...\",\n  \"tokenType\": \"Bearer\",\n  \"expiresIn\": 3600,\n  \"user\": {\n    \"id\": 102,\n    \"username\": \"loan.officer@loanflow.com\",\n    \"role\": \"LOAN_OFFICER\"\n  }\n}"
+            },
+            {
+              "name": "401 Unauthorized",
+              "status": "Unauthorized",
+              "code": 401,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"timestamp\": \"2026-03-24T14:20:11Z\",\n  \"status\": 401,\n  \"error\": \"Unauthorized\",\n  \"message\": \"Invalid username or password\",\n  \"path\": \"/api/v1/auth/login\"\n}"
+            },
+            {
+              "name": "429 Too Many Requests",
+              "status": "Too Many Requests",
+              "code": 429,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"timestamp\": \"2026-03-24T14:20:11Z\",\n  \"status\": 429,\n  \"error\": \"Too Many Requests\",\n  \"message\": \"Login rate limit exceeded\",\n  \"path\": \"/api/v1/auth/login\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Refresh Access Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('accessToken', body.accessToken);",
+                  "    console.log('accessToken refreshed');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+            },
+            "url": {
+              "raw": "{{identityServiceUrl}}/api/v1/auth/refresh",
+              "host": ["{{identityServiceUrl}}"],
+              "path": ["api", "v1", "auth", "refresh"]
+            },
+            "description": "Issues a new access token using a valid refresh token. The test script updates `accessToken` automatically."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"accessToken\": \"eyJhbGciOiJIUzI1NiJ9.newtoken...\",\n  \"tokenType\": \"Bearer\",\n  \"expiresIn\": 3600\n}"
+            },
+            {
+              "name": "401 Unauthorized — Expired Refresh Token",
+              "status": "Unauthorized",
+              "code": 401,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"timestamp\": \"2026-03-24T14:21:03Z\",\n  \"status\": 401,\n  \"error\": \"Unauthorized\",\n  \"message\": \"Refresh token is invalid or expired\",\n  \"path\": \"/api/v1/auth/refresh\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Current User Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{identityServiceUrl}}/api/v1/auth/me",
+              "host": ["{{identityServiceUrl}}"],
+              "path": ["api", "v1", "auth", "me"]
+            },
+            "description": "Returns the authenticated user's profile and role. JWT required."
+          },
+          "response": [
+            {
+              "name": "200 OK — Loan Officer",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"id\": 102,\n  \"username\": \"loan.officer@loanflow.com\",\n  \"fullName\": \"Jordan Smith\",\n  \"role\": \"LOAN_OFFICER\",\n  \"permissions\": [\n    \"APPLICATION_READ\",\n    \"APPLICATION_REVIEW\",\n    \"UNDERWRITING_DECIDE\"\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Health Check — Identity Service",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{identityServiceUrl}}/actuator/health",
+              "host": ["{{identityServiceUrl}}"],
+              "path": ["actuator", "health"]
+            },
+            "description": "Liveness/readiness probe for the Identity Service."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"status\": \"UP\",\n  \"components\": {\n    \"db\": { \"status\": \"UP\" },\n    \"redis\": { \"status\": \"UP\" }\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Loan Applications",
+      "description": "Targets the Loan Application Service directly at `{{loanServiceUrl}}` (default: localhost:8082).",
+      "item": [
+        {
+          "name": "Create Loan Application",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('applicationId', body.applicationId);",
+                  "    console.log('applicationId captured:', body.applicationId);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"loanType\": \"PERSONAL\",\n  \"amount\": 25000,\n  \"termMonths\": 48,\n  \"annualIncome\": 92000,\n  \"employmentStatus\": \"FULL_TIME\",\n  \"applicantDetails\": {\n    \"firstName\": \"Devin\",\n    \"lastName\": \"Catuns\",\n    \"email\": \"devin@example.com\",\n    \"phone\": \"555-0147\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{loanServiceUrl}}/api/v1/applications",
+              "host": ["{{loanServiceUrl}}"],
+              "path": ["api", "v1", "applications"]
+            },
+            "description": "Creates a new loan application. Requires `APPLICANT` role.\n\nPublishes `loan.application.submitted` Kafka event on success. The test script captures the returned `applicationId`.\n\n**loanType options:** `PERSONAL`, `HOME`, `AUTO`, `BUSINESS`\n**employmentStatus options:** `FULL_TIME`, `PART_TIME`, `SELF_EMPLOYED`, `UNEMPLOYED`"
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"applicationId\": 50021,\n  \"status\": \"SUBMITTED\",\n  \"submittedAt\": \"2026-03-24T14:30:22Z\",\n  \"loanType\": \"PERSONAL\",\n  \"amount\": 25000,\n  \"nextStep\": \"UPLOAD_REQUIRED_DOCUMENTS\"\n}"
+            },
+            {
+              "name": "409 Conflict — Duplicate Application",
+              "status": "Conflict",
+              "code": 409,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"timestamp\": \"2026-03-24T14:30:29Z\",\n  \"status\": 409,\n  \"error\": \"Conflict\",\n  \"message\": \"An active application already exists for this applicant and loan type\",\n  \"path\": \"/api/v1/applications\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Application Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{loanServiceUrl}}/api/v1/applications/{{applicationId}}",
+              "host": ["{{loanServiceUrl}}"],
+              "path": ["api", "v1", "applications", "{{applicationId}}"]
+            },
+            "description": "Returns full details for a specific loan application. Response is cached in Redis with a short TTL.\n\n- `APPLICANT` — own application only\n- `LOAN_OFFICER`, `ADMIN` — assigned or all permitted applications"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"applicationId\": 50021,\n  \"status\": \"UNDERWRITING_IN_PROGRESS\",\n  \"loanType\": \"PERSONAL\",\n  \"amount\": 25000,\n  \"termMonths\": 48,\n  \"annualIncome\": 92000,\n  \"submittedAt\": \"2026-03-24T14:30:22Z\",\n  \"applicantDetails\": {\n    \"firstName\": \"Devin\",\n    \"lastName\": \"Catuns\",\n    \"email\": \"devin@example.com\"\n  },\n  \"documentSummary\": {\n    \"required\": 4,\n    \"uploaded\": 4,\n    \"verified\": 4\n  }\n}"
+            },
+            {
+              "name": "404 Not Found",
+              "status": "Not Found",
+              "code": 404,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"timestamp\": \"2026-03-24T14:31:00Z\",\n  \"status\": 404,\n  \"error\": \"Not Found\",\n  \"message\": \"Application not found\",\n  \"path\": \"/api/v1/applications/50021\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Search Applications",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{loanServiceUrl}}/api/v1/applications?status=PENDING_REVIEW&page=0&size=20&sort=submittedAt,desc",
+              "host": ["{{loanServiceUrl}}"],
+              "path": ["api", "v1", "applications"],
+              "query": [
+                { "key": "status", "value": "PENDING_REVIEW", "description": "SUBMITTED | PENDING_DOCUMENTS | PENDING_REVIEW | UNDERWRITING_IN_PROGRESS | APPROVED | REJECTED" },
+                { "key": "loanType", "value": "", "description": "PERSONAL | HOME | AUTO | BUSINESS", "disabled": true },
+                { "key": "page", "value": "0" },
+                { "key": "size", "value": "20" },
+                { "key": "sort", "value": "submittedAt,desc", "description": "Field,direction — e.g. submittedAt,desc or amount,asc" }
+              ]
+            },
+            "description": "Returns a paginated list of applications for review dashboards. Requires `LOAN_OFFICER` or `ADMIN` role."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"content\": [\n    {\n      \"applicationId\": 50021,\n      \"applicantName\": \"Devin Catuns\",\n      \"loanType\": \"PERSONAL\",\n      \"amount\": 25000,\n      \"status\": \"PENDING_REVIEW\",\n      \"submittedAt\": \"2026-03-24T14:30:22Z\"\n    }\n  ],\n  \"page\": 0,\n  \"size\": 20,\n  \"totalElements\": 143,\n  \"totalPages\": 8\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update Application Status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"PENDING_DOCUMENTS\",\n  \"reason\": \"Income verification document missing\"\n}"
+            },
+            "url": {
+              "raw": "{{loanServiceUrl}}/api/v1/applications/{{applicationId}}/status",
+              "host": ["{{loanServiceUrl}}"],
+              "path": ["api", "v1", "applications", "{{applicationId}}", "status"]
+            },
+            "description": "Updates the master application status. Requires `LOAN_OFFICER` or `ADMIN` role.\n\nPublishes `loan.status.updated` Kafka event on success.\n\n**Valid status values:** `PENDING_DOCUMENTS`, `PENDING_REVIEW`, `UNDERWRITING_IN_PROGRESS`, `APPROVED`, `REJECTED`, `CANCELLED`"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"applicationId\": 50021,\n  \"previousStatus\": \"SUBMITTED\",\n  \"currentStatus\": \"PENDING_DOCUMENTS\",\n  \"updatedAt\": \"2026-03-24T15:02:11Z\",\n  \"reason\": \"Income verification document missing\"\n}"
+            },
+            {
+              "name": "409 Conflict — Invalid State Transition",
+              "status": "Conflict",
+              "code": 409,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"timestamp\": \"2026-03-24T15:03:44Z\",\n  \"status\": 409,\n  \"error\": \"Conflict\",\n  \"message\": \"Cannot transition application from APPROVED to PENDING_DOCUMENTS\",\n  \"path\": \"/api/v1/applications/50021/status\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Health Check — Loan Application Service",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{loanServiceUrl}}/actuator/health",
+              "host": ["{{loanServiceUrl}}"],
+              "path": ["actuator", "health"]
+            },
+            "description": "Liveness/readiness probe for the Loan Application Service."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"status\": \"UP\",\n  \"components\": {\n    \"db\": { \"status\": \"UP\" },\n    \"redis\": { \"status\": \"UP\" },\n    \"kafka\": { \"status\": \"UP\" }\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Document Management",
+      "description": "Targets the Document Service directly at `{{documentServiceUrl}}` (default: localhost:8083).",
+      "item": [
+        {
+          "name": "Upload Document Metadata",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('documentId', body.documentId);",
+                  "    console.log('documentId captured:', body.documentId);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"documentType\": \"PAY_STUB\",\n  \"fileName\": \"paystub-mar-2026.pdf\",\n  \"storageKey\": \"loan-apps/{{applicationId}}/paystub-mar-2026.pdf\",\n  \"contentType\": \"application/pdf\"\n}"
+            },
+            "url": {
+              "raw": "{{documentServiceUrl}}/api/v1/applications/{{applicationId}}/documents",
+              "host": ["{{documentServiceUrl}}"],
+              "path": ["api", "v1", "applications", "{{applicationId}}", "documents"]
+            },
+            "description": "Registers uploaded document metadata. Binary upload goes directly to S3 via a pre-signed URL; this endpoint stores the metadata only.\n\n**documentType options:** `PAY_STUB`, `BANK_STATEMENT`, `TAX_RETURN`, `GOVERNMENT_ID`, `PROOF_OF_ADDRESS`\n\nRate-limited via Redis distributed counter."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"documentId\": 88041,\n  \"applicationId\": 50021,\n  \"documentType\": \"PAY_STUB\",\n  \"status\": \"UPLOADED\",\n  \"uploadedAt\": \"2026-03-24T15:11:40Z\"\n}"
+            },
+            {
+              "name": "413 Payload Too Large",
+              "status": "Payload Too Large",
+              "code": 413,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"timestamp\": \"2026-03-24T15:11:50Z\",\n  \"status\": 413,\n  \"error\": \"Payload Too Large\",\n  \"message\": \"Upload policy violation\",\n  \"path\": \"/api/v1/applications/50021/documents\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "List Documents for Application",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{documentServiceUrl}}/api/v1/applications/{{applicationId}}/documents",
+              "host": ["{{documentServiceUrl}}"],
+              "path": ["api", "v1", "applications", "{{applicationId}}", "documents"]
+            },
+            "description": "Returns all submitted documents and their verification state for a loan application."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"applicationId\": 50021,\n  \"documents\": [\n    {\n      \"documentId\": 88041,\n      \"documentType\": \"PAY_STUB\",\n      \"fileName\": \"paystub-mar-2026.pdf\",\n      \"status\": \"VERIFIED\",\n      \"uploadedAt\": \"2026-03-24T15:11:40Z\",\n      \"verifiedAt\": \"2026-03-24T15:20:00Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Verify Documents",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"verifiedBy\": \"loan.officer@loanflow.com\",\n  \"notes\": \"All required documents reviewed and accepted\"\n}"
+            },
+            "url": {
+              "raw": "{{documentServiceUrl}}/api/v1/applications/{{applicationId}}/documents/verify",
+              "host": ["{{documentServiceUrl}}"],
+              "path": ["api", "v1", "applications", "{{applicationId}}", "documents", "verify"]
+            },
+            "description": "Validates document completeness and marks the application ready for underwriting. Requires `LOAN_OFFICER` or `ADMIN` role.\n\nPublishes `loan.document.verified` Kafka event."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"applicationId\": 50021,\n  \"documentVerificationStatus\": \"VERIFIED\",\n  \"verifiedAt\": \"2026-03-24T15:20:00Z\",\n  \"nextStep\": \"UNDERWRITING_REQUESTED\"\n}"
+            },
+            {
+              "name": "400 Bad Request — Missing Documents",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"timestamp\": \"2026-03-24T15:20:15Z\",\n  \"status\": 400,\n  \"error\": \"Bad Request\",\n  \"message\": \"Required documents missing: BANK_STATEMENT\",\n  \"path\": \"/api/v1/applications/50021/documents/verify\"\n}"
+            },
+            {
+              "name": "409 Conflict — Already Verified",
+              "status": "Conflict",
+              "code": 409,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"timestamp\": \"2026-03-24T15:20:20Z\",\n  \"status\": 409,\n  \"error\": \"Conflict\",\n  \"message\": \"Documents already verified for this application\",\n  \"path\": \"/api/v1/applications/50021/documents/verify\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Health Check — Document Service",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{documentServiceUrl}}/actuator/health",
+              "host": ["{{documentServiceUrl}}"],
+              "path": ["actuator", "health"]
+            },
+            "description": "Liveness/readiness probe for the Document Service."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"status\": \"UP\",\n  \"components\": {\n    \"db\": { \"status\": \"UP\" },\n    \"kafka\": { \"status\": \"UP\" }\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Underwriting & Decisions",
+      "description": "Targets the Underwriting Service directly at `{{underwritingServiceUrl}}` (default: localhost:8084).",
+      "item": [
+        {
+          "name": "Get Underwriting Decision",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{underwritingServiceUrl}}/api/v1/underwriting/{{applicationId}}",
+              "host": ["{{underwritingServiceUrl}}"],
+              "path": ["api", "v1", "underwriting", "{{applicationId}}"]
+            },
+            "description": "Returns underwriting outcome and review summary. `LOAN_OFFICER` and `ADMIN` have full access; `APPLICANT` may see a limited final decision summary only."
+          },
+          "response": [
+            {
+              "name": "200 OK — Approved",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"applicationId\": 50021,\n  \"decisionStatus\": \"APPROVED\",\n  \"decisionAt\": \"2026-03-24T16:02:11Z\",\n  \"decisionReason\": \"Income and debt ratio within policy thresholds\",\n  \"recommendedAmount\": 25000,\n  \"recommendedTermMonths\": 48,\n  \"manualReviewRequired\": false\n}"
+            },
+            {
+              "name": "404 Not Found — Decision Pending",
+              "status": "Not Found",
+              "code": 404,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"timestamp\": \"2026-03-24T16:00:00Z\",\n  \"status\": 404,\n  \"error\": \"Not Found\",\n  \"message\": \"Underwriting decision not yet available\",\n  \"path\": \"/api/v1/underwriting/50021\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Submit Manual Review Decision",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"decision\": \"MANUAL_APPROVAL\",\n  \"reason\": \"External credit dependency unavailable; officer completed manual review\",\n  \"recommendedAmount\": 20000,\n  \"recommendedTermMonths\": 36\n}"
+            },
+            "url": {
+              "raw": "{{underwritingServiceUrl}}/api/v1/underwriting/{{applicationId}}/decision",
+              "host": ["{{underwritingServiceUrl}}"],
+              "path": ["api", "v1", "underwriting", "{{applicationId}}", "decision"]
+            },
+            "description": "Finalizes a manual underwriting outcome. Requires `LOAN_OFFICER` or `ADMIN` role.\n\nPublishes `loan.underwriting.completed` Kafka event.\n\n**decision options:** `MANUAL_APPROVAL`, `MANUAL_REJECTION`"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"applicationId\": 50021,\n  \"decisionStatus\": \"APPROVED\",\n  \"decisionSource\": \"MANUAL_REVIEW\",\n  \"decisionAt\": \"2026-03-24T16:15:00Z\"\n}"
+            },
+            {
+              "name": "409 Conflict — Already Finalized",
+              "status": "Conflict",
+              "code": 409,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"timestamp\": \"2026-03-24T16:15:10Z\",\n  \"status\": 409,\n  \"error\": \"Conflict\",\n  \"message\": \"Decision already finalized for this application\",\n  \"path\": \"/api/v1/underwriting/50021/decision\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Re-run Underwriting",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Updated income documents submitted\"\n}"
+            },
+            "url": {
+              "raw": "{{underwritingServiceUrl}}/api/v1/underwriting/{{applicationId}}/re-evaluate",
+              "host": ["{{underwritingServiceUrl}}"],
+              "path": ["api", "v1", "underwriting", "{{applicationId}}", "re-evaluate"]
+            },
+            "description": "Triggers re-evaluation of an application when data changes or review is reopened. Requires `LOAN_OFFICER` or `ADMIN` role."
+          },
+          "response": [
+            {
+              "name": "202 Accepted",
+              "status": "Accepted",
+              "code": 202,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"applicationId\": 50021,\n  \"status\": \"RE_EVALUATION_REQUESTED\",\n  \"requestedAt\": \"2026-03-24T16:20:10Z\"\n}"
+            },
+            {
+              "name": "409 Conflict — Not Eligible",
+              "status": "Conflict",
+              "code": 409,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"timestamp\": \"2026-03-24T16:20:15Z\",\n  \"status\": 409,\n  \"error\": \"Conflict\",\n  \"message\": \"Application is not eligible for re-evaluation in its current state\",\n  \"path\": \"/api/v1/underwriting/50021/re-evaluate\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Health Check — Underwriting Service",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{underwritingServiceUrl}}/actuator/health",
+              "host": ["{{underwritingServiceUrl}}"],
+              "path": ["actuator", "health"]
+            },
+            "description": "Liveness/readiness probe for the Underwriting Service."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"status\": \"UP\",\n  \"components\": {\n    \"db\": { \"status\": \"UP\" },\n    \"kafka\": { \"status\": \"UP\" }\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5. Notifications & Audit",
+      "description": "Targets the Notification/Audit Service directly at `{{auditServiceUrl}}` (default: localhost:8085, backed by MongoDB).",
+      "item": [
+        {
+          "name": "Get Application Activity Timeline",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{auditServiceUrl}}/api/v1/audit/applications/{{applicationId}}/timeline",
+              "host": ["{{auditServiceUrl}}"],
+              "path": ["api", "v1", "audit", "applications", "{{applicationId}}", "timeline"]
+            },
+            "description": "Returns a chronological audit trail of major application events. Populated asynchronously from Kafka — may be eventually consistent by a few seconds.\n\n- `APPLICANT` — own application only\n- `LOAN_OFFICER`, `ADMIN` — any application"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"applicationId\": 50021,\n  \"events\": [\n    {\n      \"eventType\": \"APPLICATION_SUBMITTED\",\n      \"occurredAt\": \"2026-03-24T14:30:22Z\",\n      \"performedBy\": \"devin@example.com\",\n      \"summary\": \"Loan application submitted\"\n    },\n    {\n      \"eventType\": \"DOCUMENTS_VERIFIED\",\n      \"occurredAt\": \"2026-03-24T15:20:00Z\",\n      \"performedBy\": \"loan.officer@loanflow.com\",\n      \"summary\": \"Required documents verified\"\n    },\n    {\n      \"eventType\": \"UNDERWRITING_COMPLETED\",\n      \"occurredAt\": \"2026-03-24T16:02:11Z\",\n      \"performedBy\": \"system\",\n      \"summary\": \"Application approved\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Notification History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{auditServiceUrl}}/api/v1/notifications?page=0&size=10&read=false",
+              "host": ["{{auditServiceUrl}}"],
+              "path": ["api", "v1", "notifications"],
+              "query": [
+                { "key": "page", "value": "0" },
+                { "key": "size", "value": "10" },
+                { "key": "read", "value": "false", "description": "true | false — filter by read status" }
+              ]
+            },
+            "description": "Returns notifications for the authenticated user, paginated."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"content\": [\n    {\n      \"notificationId\": \"ntf-4001\",\n      \"type\": \"APPLICATION_STATUS\",\n      \"title\": \"Application Approved\",\n      \"message\": \"Your loan application #50021 has been approved.\",\n      \"read\": false,\n      \"createdAt\": \"2026-03-24T16:03:15Z\"\n    }\n  ],\n  \"page\": 0,\n  \"size\": 10,\n  \"totalElements\": 7,\n  \"totalPages\": 1\n}"
+            }
+          ]
+        },
+        {
+          "name": "Mark Notification as Read",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{auditServiceUrl}}/api/v1/notifications/{{notificationId}}/read",
+              "host": ["{{auditServiceUrl}}"],
+              "path": ["api", "v1", "notifications", "{{notificationId}}", "read"]
+            },
+            "description": "Marks a specific notification as read for the authenticated user."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"notificationId\": \"ntf-4001\",\n  \"read\": true,\n  \"updatedAt\": \"2026-03-24T16:10:01Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Health Check — Audit Service",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{auditServiceUrl}}/actuator/health",
+              "host": ["{{auditServiceUrl}}"],
+              "path": ["actuator", "health"]
+            },
+            "description": "Liveness/readiness probe for the Notification/Audit Service."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"status\": \"UP\",\n  \"components\": {\n    \"mongo\": { \"status\": \"UP\" },\n    \"kafka\": { \"status\": \"UP\" }\n  }\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
