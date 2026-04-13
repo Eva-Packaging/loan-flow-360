@@ -1,5 +1,6 @@
-package com.loanflow.common.exception;
+package com.loanflow.loanservice.exception;
 
+import com.loanflow.common.exception.AccessDeniedException;
 import com.loanflow.common.exception.ResourceNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
