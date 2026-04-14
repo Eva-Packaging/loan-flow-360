@@ -56,6 +56,6 @@ build/
 hs_err_pid*
 replay_pid*
 
-.claude
+.claude/settings.local.json
 CLAUDE.md
 .DS_Store

@@ -1,0 +1,55 @@
+{
+  "summary": "Consolidate LoanApplicationService packages and centralize loanflow-common in parent POM dependency management",
+  "description": "The loan-service currently has two competing service layer packages: the stale <services/> package containing <services/LoanApplicationService.java> and <services/LoanApplicationServiceImpl.java>, and the canonical <service/> + <service/impl/> package structure containing <service/LoanApplicationService.java> and <service/impl/LoanApplicationServiceImpl.java>.\n\nThese two packages define different method contracts. The stale package exposes getApplicationById but lacks createApplication. The canonical package exposes createApplication (used by LoanApplicationController) but lacks getApplicationById. This splits the service interface across two packages and leaves the implementation incomplete in each.\n\nThis story consolidates both packages into the canonical structure: merge getApplicationById into <service/LoanApplicationService.java>, port the real implementation into <service/impl/LoanApplicationServiceImpl.java>, and delete the entire stale <services/> package.\n\nAdditionally, the <loanflow-parent/pom.xml> dependencyManagement block must be audited. loanflow-common is declared there via ${loanflow-common.version}, and the loan-service already consumes it correctly without a <version> tag. This pattern must be confirmed and enforced across all child services — no child POM should declare an explicit version for loanflow-common.",
+  "labels": ["loan-service", "refactor", "maven", "service-layer", "spring-boot"],
+  "priority": "Medium",
+  "storyPoints": 3,
+  "acceptanceCriteria": [
+    {
+      "scenario": "Single canonical service interface",
+      "given": "the loan-service source tree",
+      "when": "a developer inspects the service layer",
+      "then": "exactly one LoanApplicationService interface exists under service/ declaring both createApplication and getApplicationById, and the stale services/ package no longer exists"
+    },
+    {
+      "scenario": "Single canonical service implementation with full method coverage",
+      "given": "the consolidated service/impl/ package",
+      "when": "the Spring application context starts",
+      "then": "exactly one LoanApplicationServiceImpl bean is registered, it implements both createApplication and getApplicationById, and it injects LoanApplicationRepository"
+    },
+    {
+      "scenario": "Controller resolves service bean without ambiguity",
+      "given": "LoanApplicationController declares a LoanApplicationService dependency",
+      "when": "the application context starts",
+      "then": "Spring resolves exactly one matching bean with no NoUniqueBeanDefinitionException"
+    },
+    {
+      "scenario": "Child POMs inherit loanflow-common version from parent",
+      "given": "loanflow-common declared in loanflow-parent dependencyManagement with ${loanflow-common.version}",
+      "when": "a child service POM adds loanflow-common as a dependency",
+      "then": "no <version> tag is required in the child POM and Maven resolves the correct version from the parent"
+    }
+  ],
+  "tasks": [
+    {
+      "summary": "Delete stale services/ package from loan-service",
+      "description": "Delete both files from the stale package:\n- <backend/loan-service/src/main/java/com/loanflow/loanservice/services/LoanApplicationService.java>\n- <backend/loan-service/src/main/java/com/loanflow/loanservice/services/LoanApplicationServiceImpl.java>\n\nThese are superseded by the canonical service/ and service/impl/ packages."
+    },
+    {
+      "summary": "Merge getApplicationById into canonical service/LoanApplicationService interface",
+      "description": "Add the following method signature to <backend/loan-service/src/main/java/com/loanflow/loanservice/service/LoanApplicationService.java> alongside createApplication:\n\n```\nApplicationDetailResponse getApplicationById(Long applicationId, Long callerUserId, String callerRole);\n```\n\nAdd the required import for ApplicationDetailResponse from loanflow-common."
+    },
+    {
+      "summary": "Merge getApplicationById implementation into service/impl/LoanApplicationServiceImpl",
+      "description": "In <backend/loan-service/src/main/java/com/loanflow/loanservice/service/impl/LoanApplicationServiceImpl.java>:\n\n1. Inject LoanApplicationRepository via constructor injection\n2. Port the full getApplicationById implementation from the stale services/LoanApplicationServiceImpl, including:\n   - loanApplicationRepository.findById with ResourceNotFoundException on miss\n   - APPLICANT ownership check throwing AccessDeniedException\n   - ApplicationDetailResponse builder with all mapped fields\n3. Update the package declaration to com.loanflow.loanservice.service.impl\n4. Retain the existing createApplication implementation"
+    },
+    {
+      "summary": "Audit and enforce loanflow-common version management in loanflow-parent",
+      "description": "Verify <backend/loanflow-parent/pom.xml> has loanflow-common declared under <dependencyManagement> using ${loanflow-common.version}. Confirm no child service POM declares an explicit <version> tag for loanflow-common. Add any active child services missing from the parent <modules> list so the multi-module build resolves the dependency correctly for all services."
+    },
+    {
+      "summary": "Add unit tests for consolidated LoanApplicationServiceImpl",
+      "description": "Write unit tests covering the consolidated <service/impl/LoanApplicationServiceImpl>:\n- createApplication returns a valid CreateLoanApplicationResponse with SUBMITTED status\n- getApplicationById returns ApplicationDetailResponse for a valid application owned by the caller\n- getApplicationById throws ResourceNotFoundException when the application does not exist\n- getApplicationById throws AccessDeniedException when an APPLICANT requests another user's application\n- getApplicationById succeeds for LOAN_OFFICER regardless of ownership"
+    }
+  ]
+}

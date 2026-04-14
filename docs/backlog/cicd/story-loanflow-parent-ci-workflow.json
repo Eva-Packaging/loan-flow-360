@@ -1,0 +1,51 @@
+{
+  "summary": "Create GitHub Actions workflow to build and test loanflow-parent multi-module project",
+  "description": "No CI workflow currently builds or tests backend code. The only existing workflow is <.github/workflows/pr-checks.yml>, which validates PR title format only.\n\nThe <backend/loanflow-parent/pom.xml> is a Maven multi-module aggregator that manages three modules in reactor order: loanflow-common, gateway-service, and loan-service. Running mvn clean verify from the parent directory builds all modules in dependency order and executes tests.\n\nThis story creates <.github/workflows/loanflow-parent-ci.yml> that triggers on push and pull_request events scoped to the backend source tree. The workflow must:\n- Set up Java 17 with Maven dependency caching\n- Run the full reactor build from <backend/loanflow-parent/> using mvn clean verify\n- Upload Surefire test reports as a build artifact for inspection on failure\n\nThe loan-service includes an H2 in-memory database dependency and a @SpringBootTest context loads test. The workflow must run cleanly against the H2 test datasource without requiring external infrastructure.",
+  "labels": ["ci-cd", "github-actions", "maven", "loanflow-parent", "loan-service"],
+  "priority": "High",
+  "storyPoints": 3,
+  "acceptanceCriteria": [
+    {
+      "scenario": "Workflow triggers on push to backend paths",
+      "given": "a developer pushes a commit that modifies any file under backend/loanflow-parent/, backend/loanflow-common/, backend/loan-service/, or backend/gateway-service/",
+      "when": "the push lands on main or a development/** branch",
+      "then": "the loanflow-parent-ci workflow starts and runs the full reactor build"
+    },
+    {
+      "scenario": "Workflow triggers on pull request to backend paths",
+      "given": "a pull request is opened or updated with changes under the backend/ source tree",
+      "when": "the PR targets main or a development/** branch",
+      "then": "the workflow runs and its status is reported on the pull request checks"
+    },
+    {
+      "scenario": "Reactor build compiles and tests all modules",
+      "given": "the workflow runs mvn clean verify from backend/loanflow-parent/",
+      "when": "all source files are valid and tests pass",
+      "then": "loanflow-common, gateway-service, and loan-service are all compiled and tested in dependency order with a zero exit code"
+    },
+    {
+      "scenario": "Test results are available after a failure",
+      "given": "one or more tests fail during the workflow run",
+      "when": "the workflow completes",
+      "then": "Surefire XML reports are uploaded as a build artifact that can be downloaded from the GitHub Actions run summary"
+    }
+  ],
+  "tasks": [
+    {
+      "summary": "Create .github/workflows/loanflow-parent-ci.yml",
+      "description": "Create the workflow file at <.github/workflows/loanflow-parent-ci.yml> with the following structure:\n\n```\nname: Loan Service CI\n\non:\n  push:\n    branches:\n      - main\n      - 'development/**'\n    paths:\n      - 'backend/loanflow-parent/**'\n      - 'backend/loanflow-common/**'\n      - 'backend/loan-service/**'\n      - 'backend/gateway-service/**'\n  pull_request:\n    types: [opened, synchronize, reopened]\n    paths:\n      - 'backend/loanflow-parent/**'\n      - 'backend/loanflow-common/**'\n      - 'backend/loan-service/**'\n      - 'backend/gateway-service/**'\n\njobs:\n  build-and-test:\n    name: Build and Test (loanflow-parent reactor)\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n\n      - name: Set up Java 17\n        uses: actions/setup-java@v4\n        with:\n          java-version: '17'\n          distribution: 'temurin'\n          cache: 'maven'\n\n      - name: Build and test all parent modules\n        working-directory: backend/loanflow-parent\n        run: ./mvnw clean verify\n\n      - name: Upload Surefire test reports\n        if: always()\n        uses: actions/upload-artifact@v4\n        with:\n          name: surefire-reports\n          path: '**/target/surefire-reports/*.xml'\n          if-no-files-found: ignore\n```"
+    },
+    {
+      "summary": "Verify Maven wrapper exists in loanflow-parent",
+      "description": "Confirm that <backend/loanflow-parent/mvnw> exists and is executable. If it is missing, generate it by running mvn wrapper:wrapper -Dmaven=3.9.x from <backend/loanflow-parent/> and commit the wrapper files alongside the workflow. The workflow uses ./mvnw so the wrapper must be present."
+    },
+    {
+      "summary": "Verify loan-service @SpringBootTest runs cleanly on H2",
+      "description": "Run the existing test in <backend/loan-service/src/test/java/com/loanflow/loanservice/LoanServiceApplicationTests.java> locally against the H2 datasource to confirm the context loads without requiring MySQL. If the datasource URL in <backend/loan-service/src/main/resources/application.yaml> points to MySQL, add a test-scoped <backend/loan-service/src/test/resources/application.yaml> that overrides the datasource to H2 in-memory so CI does not need a running database."
+    },
+    {
+      "summary": "Validate workflow runs end-to-end on a feature branch",
+      "description": "Push a trivial change (e.g., a comment update) to a path covered by the workflow triggers and confirm the GitHub Actions run completes green. Check that the Surefire artifact appears in the run summary. Verify the job name appears in the PR checks list so it is visible to reviewers."
+    }
+  ]
+}

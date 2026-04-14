@@ -1,0 +1,61 @@
+{
+  "summary": "Configure automatic Docker image build in loanflow-parent via spring-boot-maven-plugin",
+  "description": "Wire the `spring-boot-maven-plugin` `build-image` goal into the `package` lifecycle phase inside <loanflow-parent/pom.xml> so that every child Spring Boot service produces a Docker image automatically when `./mvnw package` is run.\n\nTwo top-level properties are defined in the parent `<properties>` block:\n\n```\n<image.repository>loanflow</image.repository>\n<image.name>${image.repository}/${project.artifactId}:${project.version}</image.name>\n```\n\n`image.repository` acts as a placeholder for the Docker registry or ECR repository prefix and can be overridden at build time (e.g. by a Jenkins pipeline via `-Dimage.repository=123456789.dkr.ecr.eu-west-1.amazonaws.com/loanflow`) without touching the POM files.\n\n`image.name` composes the full image reference from these parts and can be further overridden per child service if a non-standard naming convention is required.\n\nNo child service should need to redeclare the `build-image` execution — it is inherited from the parent plugin management block.",
+  "labels": ["docker", "maven", "build", "devops", "spring-boot"],
+  "priority": "Medium",
+  "storyPoints": 3,
+  "acceptanceCriteria": [
+    {
+      "scenario": "Default image name is derived from repository prefix and artifactId",
+      "given": "a child service does not override image.repository or image.name",
+      "when": "./mvnw package is run for that service",
+      "then": "a Docker image is produced with the name loanflow/<artifactId>:<version>"
+    },
+    {
+      "scenario": "image.repository can be overridden at build time",
+      "given": "a Jenkins pipeline passes -Dimage.repository=123456789.dkr.ecr.eu-west-1.amazonaws.com/loanflow",
+      "when": "./mvnw package is executed for any child service",
+      "then": "the produced Docker image is tagged as 123456789.dkr.ecr.eu-west-1.amazonaws.com/loanflow/<artifactId>:<version>"
+    },
+    {
+      "scenario": "Child service can override image.name entirely",
+      "given": "a child service declares <image.name>myregistry.io/custom-name:latest</image.name> in its properties block",
+      "when": "./mvnw package is run for that service",
+      "then": "the Docker image is tagged as myregistry.io/custom-name:latest, ignoring the parent default"
+    },
+    {
+      "scenario": "build-image goal is bound to package phase",
+      "given": "the loanflow-parent pluginManagement configures build-image in the package phase",
+      "when": "any child Spring Boot service runs ./mvnw package",
+      "then": "the build-image goal executes as part of the standard Maven lifecycle without requiring an explicit goal invocation"
+    },
+    {
+      "scenario": "loanflow-common is excluded from image build",
+      "given": "loanflow-common is a library module with no Spring Boot main class",
+      "when": "the parent or multi-module build runs",
+      "then": "loanflow-common does not attempt to build a Docker image and the build succeeds cleanly"
+    }
+  ],
+  "tasks": [
+    {
+      "summary": "Add image.repository and image.name properties to loanflow-parent pom",
+      "description": "In <loanflow-parent/pom.xml>, add the following inside the `<properties>` block:\n\n```\n<image.repository>loanflow</image.repository>\n<image.name>${image.repository}/${project.artifactId}:${project.version}</image.name>\n```\n\n`image.repository` defaults to `loanflow` for local development and can be replaced by a CI/CD pipeline (e.g. an ECR URI) via a `-D` flag without modifying any POM file."
+    },
+    {
+      "summary": "Configure spring-boot-maven-plugin build-image in parent pluginManagement",
+      "description": "Inside the `<build><pluginManagement><plugins>` section of <loanflow-parent/pom.xml>, configure the `spring-boot-maven-plugin` to bind the `build-image` goal to the `package` phase and reference the `${image.name}` property:\n\n```\n<plugin>\n  <groupId>org.springframework.boot</groupId>\n  <artifactId>spring-boot-maven-plugin</artifactId>\n  <executions>\n    <execution>\n      <id>build-image</id>\n      <phase>package</phase>\n      <goals>\n        <goal>build-image</goal>\n      </goals>\n      <configuration>\n        <image>\n          <name>${image.name}</name>\n        </image>\n      </configuration>\n    </execution>\n  </executions>\n</plugin>\n```"
+    },
+    {
+      "summary": "Verify image.repository override in loan-service child pom",
+      "description": "Run a local build of <loan-service> passing the image.repository override to confirm the inheritance and property substitution chain works end-to-end:\n\n```\n./mvnw package -pl backend/loan-service -Dimage.repository=myregistry.io/loanflow -DskipTests\n```\n\nConfirm `docker images` shows the correctly tagged image after the build completes."
+    },
+    {
+      "summary": "Ensure loanflow-common skips build-image",
+      "description": "In <loanflow-common/pom.xml>, add a skip configuration for the `spring-boot-maven-plugin` so the library module does not attempt to produce a Docker image (it has no Spring Boot main class):\n\n```\n<plugin>\n  <groupId>org.springframework.boot</groupId>\n  <artifactId>spring-boot-maven-plugin</artifactId>\n  <configuration>\n    <skip>true</skip>\n  </configuration>\n</plugin>\n```"
+    },
+    {
+      "summary": "Document image.repository CI/CD override in README or docs",
+      "description": "Add a short note to <docs/roadmap.md> or <README.md> explaining the two properties and how a Jenkins pipeline should pass `-Dimage.repository=<ECR_URI>` during the package phase to produce correctly tagged ECR images without POM changes."
+    }
+  ]
+}
