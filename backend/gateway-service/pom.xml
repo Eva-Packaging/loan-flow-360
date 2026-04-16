@@ -55,6 +55,8 @@
 
 	<build>
 		<plugins>
+
+			<!-- 1. Maven Compiler Plugin (Lombok support) -->
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-compiler-plugin</artifactId>
@@ -67,18 +69,39 @@
 					</annotationProcessorPaths>
 				</configuration>
 			</plugin>
+
+			<!-- 2. Spring Boot Plugin (build image + excludes) -->
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+
 				<configuration>
+
+					<!-- Build container image -->
+					<image>
+						<name>gateway-service:latest</name>
+					</image>
+
+					<!-- Prevent Lombok from being packaged -->
 					<excludes>
 						<exclude>
 							<groupId>org.projectlombok</groupId>
 							<artifactId>lombok</artifactId>
 						</exclude>
 					</excludes>
+
 				</configuration>
+
+				<executions>
+					<execution>
+						<goals>
+							<goal>build-image</goal>
+						</goals>
+					</execution>
+				</executions>
+
 			</plugin>
+
 		</plugins>
 	</build>
 
