@@ -1,0 +1,210 @@
+{
+  "summary": "Identity Service — Refresh Token Endpoint",
+  "description": "Implement the POST /api/v1/auth/refresh endpoint in identity-service. This covers the RefreshTokenRequestDto with @Valid enforcement, RefreshTokenResponseDto matching the API reference shape, a JwtUtil class that generates and validates HS256-signed access tokens, a refreshToken method on AuthService that validates the persisted token record against the refresh_tokens table and issues a new access token, a custom InvalidRefreshTokenException for 401 responses, and GlobalExceptionHandler coverage for the 400 and 401 error cases defined in the API reference. Depends on the identity data layer for the RefreshToken entity and RefreshTokenRepository. Aligns with Sprint 3: Spring Security and JWT foundations.",
+  "labels": [
+    "identity-service",
+    "rest-api",
+    "jwt",
+    "dto",
+    "spring-mvc",
+    "validation",
+    "exception-handling",
+    "sprint-3"
+  ],
+  "priority": "High",
+  "userType": "backend developer owning the Identity Service",
+  "functionality": "validate a persisted refresh token record and issue a new short-lived JWT access token via POST /api/v1/auth/refresh",
+  "benefit": "so clients can silently renew an expired access token without re-submitting credentials, keeping sessions alive across the JWT expiry window",
+  "stories": [
+    {
+      "summary": "Create RefreshTokenRequestDto and RefreshTokenResponseDto",
+      "description": "Implement the request and response DTOs for the refresh token endpoint in identity-service under com.loanflow.identity.dto.auth. RefreshTokenRequestDto carries a single @NotBlank-annotated refreshToken field so the controller can apply @Valid. RefreshTokenResponseDto matches the POST /api/v1/auth/refresh response shape from the API reference: accessToken, tokenType, and expiresIn — no nested user object.",
+      "labels": [
+        "identity-service",
+        "dto",
+        "validation"
+      ],
+      "priority": "High",
+      "storyPoints": 2,
+      "acceptanceCriteria": [
+        {
+          "scenario": "RefreshTokenRequestDto fails validation when refreshToken is blank",
+          "given": "a RefreshTokenRequestDto is built with a blank refreshToken value",
+          "when": "Bean Validation is applied via @Valid",
+          "then": "a constraint violation is raised identifying the refreshToken field"
+        },
+        {
+          "scenario": "A fully valid RefreshTokenRequestDto passes all constraints",
+          "given": "a RefreshTokenRequestDto is built with a non-blank refreshToken value",
+          "when": "Bean Validation is applied",
+          "then": "no constraint violations are raised"
+        },
+        {
+          "scenario": "RefreshTokenResponseDto serialises to the documented POST /api/v1/auth/refresh shape",
+          "given": "a RefreshTokenResponseDto is built with accessToken, tokenType 'Bearer', and expiresIn 3600",
+          "when": "Jackson serialises the object",
+          "then": "the JSON contains accessToken, tokenType, and expiresIn and does not include a nested user object"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create RefreshTokenRequestDto with @NotBlank validation",
+          "description": "Create com.loanflow.identity.dto.auth.RefreshTokenRequestDto in identity-service:\n\n@Getter\n@NoArgsConstructor\n@AllArgsConstructor\n@Builder\npublic class RefreshTokenRequestDto {\n\n    @NotBlank(message = \"Refresh token is required\")\n    private String refreshToken;\n}"
+        },
+        {
+          "summary": "Create RefreshTokenResponseDto",
+          "description": "Create com.loanflow.identity.dto.auth.RefreshTokenResponseDto:\n\n@Getter\n@Builder\n@NoArgsConstructor\n@AllArgsConstructor\npublic class RefreshTokenResponseDto {\n    private String accessToken;\n    private String tokenType;\n    private long expiresIn;\n}"
+        }
+      ]
+    },
+    {
+      "summary": "Add JWT utility and configuration to identity-service",
+      "description": "Introduce the JJWT library and a JwtUtil class to identity-service. JwtUtil reads a plaintext secret and an expiration value from application properties and exposes three methods: generateAccessToken, isTokenValid, and extractUsername. JwtProperties binds the configuration values from application.yaml under the app.jwt prefix so the values are injectable and independently testable.",
+      "labels": [
+        "identity-service",
+        "jwt",
+        "configuration",
+        "spring-boot"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "generateAccessToken produces a parseable HS256 JWT",
+          "given": "JwtUtil is constructed with a valid secret and expiration",
+          "when": "generateAccessToken is called with a username and role",
+          "then": "the returned string is a three-part JWT signed with HS256 containing the correct subject and role claims"
+        },
+        {
+          "scenario": "isTokenValid returns false for an expired token",
+          "given": "a JWT was generated with a past expiration",
+          "when": "isTokenValid is called with that token string",
+          "then": "false is returned without throwing an exception"
+        },
+        {
+          "scenario": "extractUsername returns the subject from a valid token",
+          "given": "a JWT was generated for username 'jsmith'",
+          "when": "extractUsername is called with that token string",
+          "then": "'jsmith' is returned"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add JJWT dependencies to identity-service pom.xml",
+          "description": "Add the following three dependencies to the identity-service pom.xml under <dependencies>:\n\n<dependency>\n    <groupId>io.jsonwebtoken</groupId>\n    <artifactId>jjwt-api</artifactId>\n    <version>0.12.6</version>\n</dependency>\n<dependency>\n    <groupId>io.jsonwebtoken</groupId>\n    <artifactId>jjwt-impl</artifactId>\n    <version>0.12.6</version>\n    <scope>runtime</scope>\n</dependency>\n<dependency>\n    <groupId>io.jsonwebtoken</groupId>\n    <artifactId>jjwt-jackson</artifactId>\n    <version>0.12.6</version>\n    <scope>runtime</scope>\n</dependency>"
+        },
+        {
+          "summary": "Add JWT configuration properties to application.yaml",
+          "description": "Append the following block to application.yaml:\n\napp:\n  jwt:\n    secret: ${JWT_SECRET:this-is-a-dev-only-secret-key-min-256-bits-xx}\n    expiration-ms: 3600000\n\nThe secret is read from the JWT_SECRET environment variable at runtime and falls back to a deterministic dev placeholder so the service starts without any environment configuration locally. expiration-ms maps to a one-hour token lifetime, matching expiresIn: 3600 in the API reference response."
+        },
+        {
+          "summary": "Create JwtProperties @ConfigurationProperties class",
+          "description": "Create com.loanflow.identity.config.JwtProperties:\n\n@Getter\n@Setter\n@Configuration\n@ConfigurationProperties(prefix = \"app.jwt\")\npublic class JwtProperties {\n    private String secret;\n    private long expirationMs;\n}"
+        },
+        {
+          "summary": "Create JwtUtil component",
+          "description": "Create com.loanflow.identity.security.JwtUtil:\n\n@Component\n@RequiredArgsConstructor\npublic class JwtUtil {\n\n    private final JwtProperties jwtProperties;\n\n    private SecretKey signingKey() {\n        return Keys.hmacShaKeyFor(\n            jwtProperties.getSecret().getBytes(StandardCharsets.UTF_8));\n    }\n\n    public String generateAccessToken(String username, String role) {\n        long now = System.currentTimeMillis();\n        return Jwts.builder()\n            .subject(username)\n            .claim(\"role\", role)\n            .issuedAt(new Date(now))\n            .expiration(new Date(now + jwtProperties.getExpirationMs()))\n            .signWith(signingKey())\n            .compact();\n    }\n\n    public boolean isTokenValid(String token) {\n        try {\n            Jwts.parser().verifyWith(signingKey()).build().parseSignedClaims(token);\n            return true;\n        } catch (JwtException e) {\n            return false;\n        }\n    }\n\n    public String extractUsername(String token) {\n        return Jwts.parser().verifyWith(signingKey()).build()\n            .parseSignedClaims(token).getPayload().getSubject();\n    }\n}"
+        }
+      ]
+    },
+    {
+      "summary": "Implement refreshToken service method on AuthService",
+      "description": "Add a refreshToken method to AuthService and implement it in AuthServiceImpl. The implementation looks up the stored RefreshToken record by token value, rejects the request if the record is absent, revoked, or past its expiry timestamp, then delegates to JwtUtil to generate a new access token. A dedicated InvalidRefreshTokenException drives the 401 error path in GlobalExceptionHandler.",
+      "labels": [
+        "identity-service",
+        "service-layer",
+        "jwt",
+        "exception-handling"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "refreshToken returns a new access token for a valid, unexpired, unrevoked record",
+          "given": "a RefreshToken record exists in the database that is not revoked and has not expired",
+          "when": "AuthService.refreshToken is called with the matching token value",
+          "then": "a RefreshTokenResponseDto is returned containing a non-empty accessToken, tokenType 'Bearer', and expiresIn 3600"
+        },
+        {
+          "scenario": "refreshToken throws InvalidRefreshTokenException for an unknown token value",
+          "given": "no RefreshToken record exists for the submitted value",
+          "when": "AuthService.refreshToken is called",
+          "then": "InvalidRefreshTokenException is thrown with message 'Refresh token is invalid or expired'"
+        },
+        {
+          "scenario": "refreshToken throws InvalidRefreshTokenException for a revoked token",
+          "given": "a RefreshToken record exists with revoked set to true",
+          "when": "AuthService.refreshToken is called with that token value",
+          "then": "InvalidRefreshTokenException is thrown with message 'Refresh token is invalid or expired'"
+        },
+        {
+          "scenario": "refreshToken throws InvalidRefreshTokenException for an expired token",
+          "given": "a RefreshToken record exists with expires_at in the past",
+          "when": "AuthService.refreshToken is called with that token value",
+          "then": "InvalidRefreshTokenException is thrown with message 'Refresh token is invalid or expired'"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create InvalidRefreshTokenException",
+          "description": "Create com.loanflow.identity.exception.InvalidRefreshTokenException:\n\npublic class InvalidRefreshTokenException extends RuntimeException {\n    public InvalidRefreshTokenException(String message) {\n        super(message);\n    }\n}"
+        },
+        {
+          "summary": "Add refreshToken to AuthService interface",
+          "description": "Extend the existing AuthService interface with:\n\nRefreshTokenResponseDto refreshToken(RefreshTokenRequestDto request);"
+        },
+        {
+          "summary": "Implement refreshToken in AuthServiceImpl",
+          "description": "Wire RefreshTokenRepository and JwtUtil into AuthServiceImpl via constructor injection alongside the existing dependencies. Implement the refreshToken method:\n\n@Override\npublic RefreshTokenResponseDto refreshToken(RefreshTokenRequestDto request) {\n    RefreshToken stored = refreshTokenRepository\n        .findByTokenValue(request.getRefreshToken())\n        .orElseThrow(() -> new InvalidRefreshTokenException(\n            \"Refresh token is invalid or expired\"));\n\n    if (stored.isRevoked() ||\n            stored.getExpiresAt().before(new Timestamp(System.currentTimeMillis()))) {\n        throw new InvalidRefreshTokenException(\"Refresh token is invalid or expired\");\n    }\n\n    String role = stored.getUser().getRoles().iterator().next().getRoleCode();\n    String accessToken = jwtUtil.generateAccessToken(\n        stored.getUser().getUsername(), role);\n\n    return RefreshTokenResponseDto.builder()\n        .accessToken(accessToken)\n        .tokenType(\"Bearer\")\n        .expiresIn(jwtProperties.getExpirationMs() / 1000)\n        .build();\n}"
+        }
+      ]
+    },
+    {
+      "summary": "Add POST /api/v1/auth/refresh to AuthController and extend GlobalExceptionHandler",
+      "description": "Wire the refreshToken service method into AuthController as POST /api/v1/auth/refresh with @Valid body binding. Extend GlobalExceptionHandler to map InvalidRefreshTokenException to a 401 ProblemDetail and HttpMessageNotReadableException to a 400 ProblemDetail, covering all error cases in the API reference for this endpoint. Confirm the full flow with a dev-profile smoke test.",
+      "labels": [
+        "identity-service",
+        "rest-api",
+        "controller",
+        "exception-handling",
+        "spring-mvc"
+      ],
+      "priority": "High",
+      "storyPoints": 2,
+      "acceptanceCriteria": [
+        {
+          "scenario": "POST /api/v1/auth/refresh returns 200 with a new access token for a valid refresh token",
+          "given": "a valid, unexpired, unrevoked RefreshToken record exists in the database",
+          "when": "POST /api/v1/auth/refresh is called with that token value",
+          "then": "a 200 OK response is returned with a body containing accessToken, tokenType 'Bearer', and expiresIn 3600"
+        },
+        {
+          "scenario": "POST /api/v1/auth/refresh returns 400 when refreshToken field is blank",
+          "given": "a request body with a blank refreshToken is submitted",
+          "when": "the controller applies @Valid",
+          "then": "a 400 ProblemDetail response is returned with a detail identifying the refreshToken field"
+        },
+        {
+          "scenario": "POST /api/v1/auth/refresh returns 401 for an invalid or expired refresh token",
+          "given": "the submitted token value is not found, revoked, or expired",
+          "when": "AuthService throws InvalidRefreshTokenException",
+          "then": "a 401 ProblemDetail response is returned with message 'Refresh token is invalid or expired' and path '/api/v1/auth/refresh'"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add POST /api/v1/auth/refresh to AuthController",
+          "description": "Add the following method to com.loanflow.identity.controller.AuthController:\n\n@PostMapping(\"/refresh\")\npublic ResponseEntity<RefreshTokenResponseDto> refresh(\n        @RequestBody @Valid RefreshTokenRequestDto request) {\n    return ResponseEntity.ok(authService.refreshToken(request));\n}"
+        },
+        {
+          "summary": "Add InvalidRefreshTokenException and HttpMessageNotReadableException handlers to GlobalExceptionHandler",
+          "description": "Add the following two handlers to com.loanflow.identity.exception.GlobalExceptionHandler:\n\n@ExceptionHandler(InvalidRefreshTokenException.class)\npublic ProblemDetail handleInvalidRefreshToken(\n        InvalidRefreshTokenException ex, HttpServletRequest request) {\n    ProblemDetail pd = ProblemDetail.forStatusAndDetail(\n        HttpStatus.UNAUTHORIZED, ex.getMessage());\n    pd.setTitle(\"Unauthorized\");\n    pd.setInstance(URI.create(request.getRequestURI()));\n    return pd;\n}\n\n@ExceptionHandler(HttpMessageNotReadableException.class)\npublic ProblemDetail handleUnreadableBody(\n        HttpMessageNotReadableException ex, HttpServletRequest request) {\n    ProblemDetail pd = ProblemDetail.forStatusAndDetail(\n        HttpStatus.BAD_REQUEST, \"Request body is missing or malformed\");\n    pd.setTitle(\"Bad Request\");\n    pd.setInstance(URI.create(request.getRequestURI()));\n    return pd;\n}"
+        },
+        {
+          "summary": "Smoke test the refresh endpoint via dev profile",
+          "description": "Start identity-service with the dev profile and confirm:\n\n1. Spring context loads without errors and GET /actuator/health returns 200.\n2. POST /api/v1/auth/refresh with a blank refreshToken returns 400 with a ProblemDetail body identifying the refreshToken field.\n3. POST /api/v1/auth/refresh with a token value that does not exist in refresh_tokens returns 401 with message 'Refresh token is invalid or expired'.\n4. POST /api/v1/auth/refresh with a valid, unexpired, unrevoked token record returns 200 with accessToken, tokenType 'Bearer', and expiresIn 3600."
+        }
+      ]
+    }
+  ]
+}
