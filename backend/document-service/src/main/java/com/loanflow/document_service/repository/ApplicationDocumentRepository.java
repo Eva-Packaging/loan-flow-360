@@ -20,8 +20,7 @@ public interface ApplicationDocumentRepository extends JpaRepository<Application
 
     long countByApplicationIdAndVerificationStatus(
             Long applicationId,
-            VerificationStatus status
-    );
+            VerificationStatus status);
 
     boolean existsByStorageKey(String storageKey);
 }
