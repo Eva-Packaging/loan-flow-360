@@ -1,5 +1,5 @@
 package com.loanflow.loanservice.controller;
-
+import com.loanflow.common.dto.application.response.ApplicationDetailResponse;
 import com.loanflow.common.dto.application.request.CreateLoanApplicationRequest;
 import com.loanflow.common.dto.application.response.CreateLoanApplicationResponse;
 import com.loanflow.loanservice.service.LoanApplicationService;
@@ -26,4 +26,16 @@ public class LoanApplicationController {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(loanApplicationService.createApplication (request));
              }
+    
+    @GetMapping("/{applicationId}")
+    public ResponseEntity<ApplicationDetailResponse> getApplicationById(
+        @PathVariable Long applicationId,
+        @AuthenticationPrincipal Jwt jwt) {
+        
+        Long callerUserId = jwt.getClaim("userId");
+        String callerRole = jwt.<List<String>>getClaim("roles").get(0);
+        
+        return ResponseEntity.ok(
+            loanApplicationService.getApplicationById(applicationId, callerUserId, callerRole));
+    }
 }
