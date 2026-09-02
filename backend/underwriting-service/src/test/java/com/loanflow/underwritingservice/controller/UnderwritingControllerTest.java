@@ -8,6 +8,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
+import java.util.Random;
+
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -20,15 +22,17 @@ class UnderwritingControllerTest {
     private UnderwritingDecisionService underwritingDecisionService;
 
     @Test
-    void testGetUnderwritingDecision() throws Exception {
-        when(underwritingDecisionService.getDecision(1L))
+    void testGetUnderwritingDecisionReturnsMatchingApplicationId() throws Exception {
+        Random random = new Random();
+        long applicationId = random.nextLong();
+        when(underwritingDecisionService.getDecision(applicationId))
                 .thenReturn(com.loanflow.underwritingservice.dto.UnderwritingDecisionResponse.builder()
-                        .applicationId(1L)
+                        .applicationId(applicationId)
                         .build());
 
-        mockMvc.perform(MockMvcRequestBuilders.get("/api/v1/underwriting/{applicationId}", 1L))
+        mockMvc.perform(MockMvcRequestBuilders.get("/api/v1/underwriting/{applicationId}", applicationId))
                 .andExpect(status().isOk())
                 .andExpect(content().contentType("application/json"))
-                .andExpect(jsonPath("$.applicationId").value(1L));
+                .andExpect(jsonPath("$.applicationId").value(applicationId));
     }
 }
