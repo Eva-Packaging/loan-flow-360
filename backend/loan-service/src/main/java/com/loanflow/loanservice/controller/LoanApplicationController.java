@@ -1,5 +1,6 @@
 package com.loanflow.loanservice.controller;
 
+import com.loanflow.common.dto.application.response;
 import com.loanflow.common.dto.application.request.CreateLoanApplicationRequest;
 import com.loanflow.common.dto.application.response.CreateLoanApplicationResponse;
 import com.loanflow.loanservice.service.LoanApplicationService;
