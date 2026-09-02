@@ -19,6 +19,7 @@ import java.time.LocalDateTime;
 public class ManualReviewNote {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "review_note_id")
     private Long reviewNoteId;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -26,13 +27,14 @@ public class ManualReviewNote {
     private UnderwritingCase underwritingCase;
 
 
+    @Column(name = "reviewer_user_id", nullable = false)
     private Long reviewerUserId;
 
-    @Column(length = 1000)
+    @Column(name = "note_text", length = 1000, nullable = false)
     private String noteText;
 
     @CreationTimestamp
-    @Column(nullable = false, updatable = false)
+    @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
 
