@@ -1,6 +1,5 @@
 package com.loanflow.identity.entity;
 
-import com.loanflow.identity.entity.enums.UserStatus;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -23,27 +22,31 @@ public class User {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long userId;
 
-    @Column(length = 150, unique = true, updatable = false)
+    @Column(name = "username", length = 150, unique = true, nullable = false, updatable = false)
     private String username;
 
-    @Column(length = 255, unique = true)
+    @Column(name = "email", length = 255, unique = true, nullable = false)
     private String email;
 
-    @Column(length = 255)
+    @Column(name = "password_hash", length = 255, nullable = false)
     private String passwordHash;
 
+    @Column(name = "first_name")
     private String firstName;
 
+    @Column(name = "last_name")
     private String lastName;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "status")
     private UserStatus status;
 
     @CreationTimestamp
-    @Column(updatable = false)
+    @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
     @UpdateTimestamp
+    @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
     @ManyToMany(fetch = FetchType.LAZY)

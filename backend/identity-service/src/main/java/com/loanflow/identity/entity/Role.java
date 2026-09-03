@@ -1,6 +1,5 @@
 package com.loanflow.identity.entity;
 
-import com.loanflow.identity.entity.enums.RoleCode;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -18,10 +17,12 @@ public class Role {
     private Long roleId;
 
     @Enumerated(EnumType.STRING)
-    @Column(unique = true)
+    @Column(name = "role_code", unique = true, nullable = false)
     private RoleCode roleCode;
 
+    @Column(name = "role_name", nullable = false)
     private String roleName;
 
+    @Column(name = "description")
     private String description;
 }
