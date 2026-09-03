@@ -8,7 +8,6 @@ import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
-import java.util.List;
 
 @Entity
 @Table(name = "underwriting_cases")
@@ -20,33 +19,37 @@ import java.util.List;
 public class UnderwritingCase {
 
 
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "underwriting_case_id")
     private Long id;
 
-    @Column(unique = true, nullable = false)
+    @Column(name = "application_id", unique = true, nullable = false)
     private long applicationId;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "case_status", nullable = false)
     private CaseStatus caseStatus;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(name = "decision_status")
     private DecisionStatus decisionStatus;
 
-    @Column(length = 500, nullable =false)
+    @Column(name = "decision_reason", length = 500)
     private String decisionReason;
 
-    @Column(nullable = false, columnDefinition = "BOOLEAN DEFAULT false")
+    @Column(name = "manual_review_required", nullable = false, columnDefinition = "BOOLEAN DEFAULT false")
     private boolean manualReviewRequired = false;
 
     @CreationTimestamp
-    @Column(nullable = false, updatable = false)
+    @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    @Column(name = "completed_at")
     private LocalDateTime completedAt;
 
-    @OneToMany(mappedBy = "underwritingCase", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
-    private List<UnderwritingCase> checks;
+    // @OneToMany(mappedBy = "id", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+    // private List<UnderwritingCase> checks;
 
     //@OneToMany(mappedBy = "underwritingCase", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
     //private List<UnderwritingDecisions> decisions;
