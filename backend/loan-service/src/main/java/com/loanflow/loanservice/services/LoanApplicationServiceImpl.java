@@ -31,8 +31,7 @@ public class LoanApplicationServiceImpl implements LoanApplicationService {
                         "LoanApplication not found with id: " + applicationId));
         if ("APPLICANT".equals(callerRole)
                 && !application.getApplicantUserId().equals(callerUserId)) {
-            throw new AccessDeniedException(
-                    "Access denied to application: " + applicationId);
+            throw new AccessDeniedException("Access denied to application: " + applicationId);
         }
 
         return ApplicationDetailResponse.builder()
