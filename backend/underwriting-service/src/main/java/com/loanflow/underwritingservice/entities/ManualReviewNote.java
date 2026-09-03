@@ -30,7 +30,7 @@ public class ManualReviewNote {
     @Column(name = "reviewer_user_id", nullable = false)
     private Long reviewerUserId;
 
-    @Column(name = "note_text", length = 1000, nullable = false)
+    @Column(name = "note_text", nullable = false, columnDefinition = "TEXT")
     private String noteText;
 
     @CreationTimestamp
