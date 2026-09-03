@@ -1,4 +1,4 @@
-package com.loanflow.loanservice.service.impl;
+/*package com.loanflow.loanservice.service.impl;
 
 import com.loanflow.common.dto.application.request.CreateLoanApplicationRequest;
 import com.loanflow.common.dto.application.response.CreateLoanApplicationResponse;
@@ -24,4 +24,4 @@ public class LoanApplicationServiceImpl implements LoanApplicationService {
                 .nextStep("Application submitted successfully")
                 .build();
     }
-}
+}*/
