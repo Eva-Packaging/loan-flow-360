@@ -1,7 +1,9 @@
 package com.loanflow.loanservice.services;
 
+import com.loanflow.common.dto.application.request.CreateLoanApplicationRequest;
 import com.loanflow.common.dto.application.response.ApplicantDetailsSummary;
 import com.loanflow.common.dto.application.response.ApplicationDetailResponse;
+import com.loanflow.common.dto.application.response.CreateLoanApplicationResponse;
 import com.loanflow.common.dto.application.response.DocumentSummary;
 import com.loanflow.common.dto.enums.LoanStatus;
 import com.loanflow.common.dto.enums.LoanType;
@@ -11,6 +13,7 @@ import com.loanflow.loanservice.entity.LoanApplication;
 import com.loanflow.loanservice.repository.LoanApplicationRepository;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.time.ZoneOffset;
 
 @Service
@@ -28,8 +31,7 @@ public class LoanApplicationServiceImpl implements LoanApplicationService {
                         "LoanApplication not found with id: " + applicationId));
         if ("APPLICANT".equals(callerRole)
                 && !application.getApplicantUserId().equals(callerUserId)) {
-            throw new AccessDeniedException(
-                    "Access denied to application: " + applicationId);
+            throw new AccessDeniedException("Access denied to application: " + applicationId);
         }
 
         return ApplicationDetailResponse.builder()
@@ -50,6 +52,19 @@ public class LoanApplicationServiceImpl implements LoanApplicationService {
                         .uploaded(0)
                         .verified(0)
                         .build())
+                .build();
+    }
+    @Override
+    public CreateLoanApplicationResponse createApplication(
+            CreateLoanApplicationRequest request) {
+
+        return CreateLoanApplicationResponse.builder()
+                .applicationId(1L)
+                .status(LoanStatus.SUBMITTED)
+                .submittedAt(Instant.now())
+                .loanType(request.getLoanType())
+                .amount(request.getAmount())
+                .nextStep("Application submitted successfully")
                 .build();
     }
 }
