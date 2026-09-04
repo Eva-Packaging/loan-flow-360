@@ -67,6 +67,8 @@ public class GlobalExceptionHandler {
 
         ValidationErrorResponse validationErrorResponse = ValidationErrorResponse.builder()
                 .fieldErrors(fieldErrors)
+                .errorCode(ErrorCode.VALIDATION_FAILED.name())
+                .message("Validation failed")
                 .build();
         problemDetail.setProperty("errors", validationErrorResponse);
         return problemDetail;
