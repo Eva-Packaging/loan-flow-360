@@ -5,4 +5,7 @@ import com.loanflow.common.dto.identity.LoginResponseDto;
 
 public interface AuthService {
     LoginResponseDto login(LoginRequestDto request);
+    RefreshTokenResponse refreshToken(RefreshTokenRequest request);
 }
+
+
