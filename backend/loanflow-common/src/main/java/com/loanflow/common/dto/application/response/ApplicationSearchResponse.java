@@ -1,7 +1,7 @@
 package com.loanflow.common.dto.application.response;
 
 
-import com.loanflow.common.dto.PagedResponse;
+import com.loanflow.common.dto.response.PagedResponse;
 import lombok.Builder;
 
 import java.util.List;
@@ -13,6 +13,6 @@ public class ApplicationSearchResponse extends PagedResponse<ApplicationSummaryI
                                      int size,
                                      long totalElements,
                                      int totalPages){
-        super(content, page, size, totalElements, totalPages);
+        super(content, page, size, totalElements, totalPages, page == totalPages - 1);
     }
 }

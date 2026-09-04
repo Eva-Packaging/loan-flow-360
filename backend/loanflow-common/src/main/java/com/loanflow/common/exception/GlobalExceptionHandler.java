@@ -1,17 +1,16 @@
 package com.loanflow.common.exception;
 
+import com.loanflow.common.dto.response.ValidationErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ProblemDetail;
-import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.net.URI;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.List;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -58,14 +57,20 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ProblemDetail handleMethodArgumentNotValid(MethodArgumentNotValidException ex, HttpServletRequest request) {
         ProblemDetail problemDetail = createProblemDetail(ErrorCode.VALIDATION_FAILED, "Validation failed", request);
-        Map<String, String> fieldErrors = ex.getBindingResult().getFieldErrors().stream()
-                .collect(Collectors.toMap(
-                        FieldError::getField,
-                        fieldError -> fieldError.getDefaultMessage() == null ? "Invalid value" : fieldError.getDefaultMessage(),
-                        (first, second) -> first,
-                        LinkedHashMap::new
-                ));
-        problemDetail.setProperty("errors", fieldErrors);
+        List<ValidationErrorResponse.FieldError> fieldErrors = ex.getBindingResult().getFieldErrors().stream()
+                .map(fieldError -> ValidationErrorResponse.FieldError.builder()
+                        .field(fieldError.getField())
+                        .rejectedValue(fieldError.getRejectedValue() == null ? null : String.valueOf(fieldError.getRejectedValue()))
+                        .message(fieldError.getDefaultMessage() == null ? "Invalid value" : fieldError.getDefaultMessage())
+                        .build())
+                .toList();
+
+        ValidationErrorResponse validationErrorResponse = ValidationErrorResponse.builder()
+                .fieldErrors(fieldErrors)
+                .errorCode(ErrorCode.VALIDATION_FAILED.name())
+                .message("Validation failed")
+                .build();
+        problemDetail.setProperty("errors", validationErrorResponse);
         return problemDetail;
     }
 
