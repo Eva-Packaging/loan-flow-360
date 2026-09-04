@@ -3,12 +3,13 @@ package com.loanflow.common.dto.response;
 import com.loanflow.common.exception.ErrorCode;
 import lombok.Builder;
 import lombok.Getter;
+import lombok.experimental.SuperBuilder;
 import org.springframework.lang.Nullable;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 
-@Builder
+@SuperBuilder
 @Getter
 public class ErrorResponse {
     @Builder.Default

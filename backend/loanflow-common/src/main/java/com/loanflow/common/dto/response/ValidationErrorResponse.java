@@ -2,10 +2,11 @@ package com.loanflow.common.dto.response;
 
 import lombok.Builder;
 import lombok.Getter;
+import lombok.experimental.SuperBuilder;
 
 import java.util.List;
 
-@Builder
+@SuperBuilder
 @Getter
 public class ValidationErrorResponse extends ErrorResponse {
     private List<FieldError> fieldErrors;
