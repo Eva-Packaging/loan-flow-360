@@ -1,5 +1,6 @@
 package com.loanflow.common.event.loan;
 
+import com.loanflow.common.event.KafkaTopics;
 import com.loanflow.common.event.LoanFlowEvent;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -22,6 +23,6 @@ public class LoanApplicationSubmittedEvent extends LoanFlowEvent {
 
     public static LoanApplicationSubmittedEventBuilder<?, ?> builder() {
         return new LoanApplicationSubmittedEventBuilderImpl()
-                .eventType("loan.application.submitted");
+                .eventType(KafkaTopics.LOAN_APPLICATION_SUBMITTED);
     }
 }

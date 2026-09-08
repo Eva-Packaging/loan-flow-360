@@ -1,5 +1,6 @@
 package com.loanflow.common.event.document;
 
+import com.loanflow.common.event.KafkaTopics;
 import com.loanflow.common.event.LoanFlowEvent;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -19,6 +20,6 @@ public class LoanDocumentVerifiedEvent extends LoanFlowEvent {
 
     public static LoanDocumentVerifiedEventBuilder<?, ?> builder() {
         return new LoanDocumentVerifiedEventBuilderImpl()
-                .eventType("loan.document.verified");
+                .eventType(KafkaTopics.LOAN_DOCUMENT_VERIFIED);
     }
 }
