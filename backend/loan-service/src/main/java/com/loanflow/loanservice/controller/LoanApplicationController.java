@@ -1,12 +1,9 @@
-
 package com.loanflow.loanservice.controller;
 
 import com.loanflow.loanservice.services.LoanApplicationService;
-import com.loanflow.common.dto.application.response.*;
 import com.loanflow.common.dto.application.response.ApplicationDetailResponse;
 import com.loanflow.common.dto.application.request.CreateLoanApplicationRequest;
 import com.loanflow.common.dto.application.response.CreateLoanApplicationResponse;
-
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
@@ -28,13 +25,13 @@ public class LoanApplicationController {
     private final LoanApplicationService loanApplicationService;
 
     @PostMapping
+
     public ResponseEntity<CreateLoanApplicationResponse> createApplication(
             @RequestBody @Valid CreateLoanApplicationRequest request)
-    {
-
+             {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(loanApplicationService.createApplication (request));
-    }
+             }
 
     @GetMapping("/{applicationId}")
 
