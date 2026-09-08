@@ -4,31 +4,31 @@ import com.loanflow.common.dto.application.response.ApplicationDetailResponse;
 import com.loanflow.common.dto.application.response.*;
 import com.loanflow.common.dto.application.request.CreateLoanApplicationRequest;
 import com.loanflow.common.dto.application.response.CreateLoanApplicationResponse;
-import com.loanflow.loanservice.service.LoanApplicationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/applications")
 @RequiredArgsConstructor
 public class LoanApplicationController {
 
-    private final LoanApplicationService loanApplicationService;
+    private final com.loanflow.loanservice.service.LoanApplicationService createLoanApplicationService;
+    private final com.loanflow.loanservice.services.LoanApplicationService getLoanApplicationService;
 
     @PostMapping
-
     public ResponseEntity<CreateLoanApplicationResponse> createApplication(
             @RequestBody @Valid CreateLoanApplicationRequest request)
              {
-
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(loanApplicationService.createApplication (request));
+                    .body(createLoanApplicationService.createApplication(request));
              }
-    
+
     @GetMapping("/{applicationId}")
     public ResponseEntity<ApplicationDetailResponse> getApplicationById(
         @PathVariable Long applicationId,
@@ -37,7 +37,6 @@ public class LoanApplicationController {
         Long callerUserId = jwt.getClaim("userId");
         String callerRole = jwt.<List<String>>getClaim("roles").get(0);
 
-        return ResponseEntity.ok(loanApplicationService.getApplicationById(applicationId, callerUserId, callerRole));
+        return ResponseEntity.ok(getLoanApplicationService.getApplicationById(applicationId, callerUserId, callerRole));
     }
-    
 }
