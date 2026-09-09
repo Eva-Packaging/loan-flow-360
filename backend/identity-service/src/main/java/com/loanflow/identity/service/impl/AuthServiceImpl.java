@@ -1,24 +1,17 @@
 package com.loanflow.identity.service.impl;
 
-import com.loanflow.identity.dto.RefreshTokenRequest;
-import com.loanflow.identity.dto.RefreshTokenResponse;
-import com.loanflow.identity.exception.InvalidRefreshTokenException;
-import org.springframework.stereotype.Service;
-
 import com.loanflow.common.dto.identity.LoginRequestDto;
 import com.loanflow.common.dto.identity.LoginResponseDto;
 import com.loanflow.common.dto.identity.UserSummaryDto;
+import com.loanflow.identity.config.JwtProperties;
+import com.loanflow.identity.dto.RefreshTokenRequest;
+import com.loanflow.identity.dto.RefreshTokenResponse;
 import com.loanflow.identity.entity.RefreshToken;
 import com.loanflow.identity.exception.InvalidRefreshTokenException;
 import com.loanflow.identity.repository.RefreshTokenRepository;
-import com.loanflow.identity.service.AuthService;
 import com.loanflow.identity.security.JwtUtil;
-import com.loanflow.identity.config.JwtProperties;
-import com.loanflow.common.dto.identity.RefreshTokenRequestDto;
-import com.loanflow.common.dto.identity.RefreshTokenResponseDto;
-
+import com.loanflow.identity.service.AuthService;
 import lombok.RequiredArgsConstructor;
-
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -27,12 +20,8 @@ import java.time.Instant;
 @RequiredArgsConstructor
 public class AuthServiceImpl implements AuthService {
 
-
-    //private final RefreshTokenRepository refreshTokenRepository;
     private final JwtUtil jwtUtil;
     private final JwtProperties jwtProperties;
-
-
 
     private final RefreshTokenRepository refreshTokenRepository;
 
@@ -55,12 +44,12 @@ public class AuthServiceImpl implements AuthService {
 
         RefreshToken refreshToken = refreshTokenRepository
                 .findByToken(request.getRefreshToken())
-                .orElseThrow(InvalidRefreshTokenException::new);
+                .orElseThrow(() -> new InvalidRefreshTokenException("Token not found"));
 
         if (refreshToken.isRevoked()
                 || refreshToken.getExpiresAt().isBefore(Instant.now())) {
 
-            throw new InvalidRefreshTokenException();
+            throw new InvalidRefreshTokenException("Token is revoked");
         }
 
         return new RefreshTokenResponse(
