@@ -1,5 +1,8 @@
 package com.loanflow.identity.service.impl;
 
+import com.loanflow.identity.exception.InvalidRefreshTokenException;
+import org.springframework.stereotype.Service;
+
 import com.loanflow.common.dto.identity.LoginRequestDto;
 import com.loanflow.common.dto.identity.LoginResponseDto;
 import com.loanflow.common.dto.identity.UserSummaryDto;
@@ -7,6 +10,10 @@ import com.loanflow.identity.entity.RefreshToken;
 import com.loanflow.identity.exception.InvalidRefreshTokenException;
 import com.loanflow.identity.repository.RefreshTokenRepository;
 import com.loanflow.identity.service.AuthService;
+import com.loanflow.identity.security.JwtUtil;
+import com.loanflow.identity.config.JwtProperties;
+import com.loanflow.common.dto.identity.RefreshTokenRequestDto;
+import com.loanflow.common.dto.identity.RefreshTokenResponseDto;
 
 import lombok.RequiredArgsConstructor;
 
@@ -18,21 +25,27 @@ import java.time.Instant;
 @RequiredArgsConstructor
 public class AuthServiceImpl implements AuthService {
 
+
+    //private final RefreshTokenRepository refreshTokenRepository;
+    private final JwtUtil jwtUtil;
+    private final JwtProperties jwtProperties;
+
+
+
     private final RefreshTokenRepository refreshTokenRepository;
 
     @Override
     public LoginResponseDto login(LoginRequestDto request) {
-
         return LoginResponseDto.builder()
-                .accessToken("stub-access-token")
-                .tokenType("Bearer")
-                .expiresIn(3600)
-                .user(UserSummaryDto.builder()
-                        .id(102L)
-                        .username(request.getUsername())
-                        .role("LOAN_OFFICER")
-                        .build())
-                .build();
+            .accessToken("stub-access-token")
+            .tokenType("Bearer")
+            .expiresIn(3600)
+            .user(UserSummaryDto.builder()
+                .id(102L)
+                .username(request.getUsername())
+                .role("LOAN_OFFICER")
+                .build())
+            .build();
     }
 
     @Override

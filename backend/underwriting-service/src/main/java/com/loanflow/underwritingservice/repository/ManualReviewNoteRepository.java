@@ -8,7 +8,7 @@ import java.util.List;
 
 @Repository
 public interface ManualReviewNoteRepository extends JpaRepository<ManualReviewNote, Long> {
-    List<ManualReviewNote> findByUnderwritingCase_UnderwritingCaseIdOrderByCreatedAtAsc(
+    List<ManualReviewNote> findByUnderwritingCase_IdOrderByCreatedAtAsc(
             Long caseId
     );
 }

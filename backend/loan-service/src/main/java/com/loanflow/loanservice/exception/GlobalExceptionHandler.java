@@ -1,6 +1,6 @@
 package com.loanflow.loanservice.exception;
 
-import com.loanflow.common.exception.AccessDeniedException;
+import com.loanflow.common.exception.ForbiddenException;
 import com.loanflow.common.exception.ResourceNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
@@ -18,7 +18,7 @@ public class GlobalExceptionHandler{
                 .body(problemDetail);
     }
     @ExceptionHandler
-    public ResponseEntity<ProblemDetail> handleNotFound(AccessDeniedException ex, HttpServletRequest request){
+    public ResponseEntity<ProblemDetail> handleNotFound(ForbiddenException ex, HttpServletRequest request){
         ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, ex.getMessage());
         // Configure additional properties
         return ResponseEntity.status(HttpStatus.NOT_FOUND)

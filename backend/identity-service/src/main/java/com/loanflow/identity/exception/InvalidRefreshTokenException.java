@@ -1,8 +1,7 @@
 package com.loanflow.identity.exception;
 
 public class InvalidRefreshTokenException extends RuntimeException {
-
-    public InvalidRefreshTokenException() {
-        super("Refresh token is invalid or expired");
+    public InvalidRefreshTokenException(String message) {
+        super(message);
     }
 }

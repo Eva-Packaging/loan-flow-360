@@ -11,8 +11,8 @@ import java.util.Optional;
 @Repository
 public interface UnderwritingCheckRepository extends JpaRepository<UnderwritingChecks, Long> {
 
-    List<UnderwritingChecks> findByUnderwritingCase_underWritingCaseId(Long caseId);
-    Optional<UnderwritingChecks> findByUnderwritingCase_UnderwritingCaseIdAndCheckType
+    List<UnderwritingChecks> findByUnderwritingCase_Id(Long caseId);
+    Optional<UnderwritingChecks> findByUnderwritingCase_IdAndCheckType
             (long caseId, CheckType checkType);
 
 }
