@@ -90,5 +90,6 @@
         <module>../loanflow-common</module>
         <module>../gateway-service</module>
         <module>../loan-service</module>
+        <module>../identity-service</module>
     </modules>
 </project>
