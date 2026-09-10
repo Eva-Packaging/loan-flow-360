@@ -1,6 +1,7 @@
 package com.loanflow.underwritingservice.entities;
 
 import com.loanflow.underwritingservice.entities.enums.DecisionType;
+import com.loanflow.underwritingservice.entities.enums.DecisionSource;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -19,7 +20,9 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 
 public class UnderwritingDecision {
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "decision_id")
     private Long decisionId;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -27,16 +30,24 @@ public class UnderwritingDecision {
     private UnderwritingCase underwritingCase;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(name = "decision_type", nullable = false)
     private DecisionType decisionType;
 
-    @Column(precision = 15, scale = 2)
+    @Column(name = "recommended_amount", precision = 15, scale = 2)
     private BigDecimal recommendedAmount;
 
+    @Column(name = "recommended_term_months")
+    private Integer recommendedTermMonths;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "decision_source", nullable = false)
+    private DecisionSource decisionSource;
+
+    @Column(name = "decided_by_user_id")
     private Long decidedByUserId;
 
     @CreationTimestamp
-    @Column(nullable = false, updatable = false)
+    @Column(name = "decision_at", nullable = false, updatable = false)
     private LocalDateTime decisionAt;
 
 }

@@ -19,6 +19,7 @@ import java.time.LocalDateTime;
 public class UnderwritingChecks {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "check_id")
     private Long checkId;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -26,22 +27,22 @@ public class UnderwritingChecks {
     private UnderwritingCase underwritingCase;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(name = "check_type", nullable = false)
     private CheckType checkType;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(name = "check_status", nullable = false)
     private CheckStatus checkStatus;
 
-    @Column(length = 50)
+    @Column(name = "result_code", length = 50)
     private String resultCode;
 
-    @Column(length = 255)
+    @Column(name = "result_summary", length = 255)
     private String resultSummary;
 
     @CreationTimestamp
-    @Column(nullable = false, updatable = false)
-    private LocalDateTime excutedAt;
+    @Column(name = "executed_at", nullable = false, updatable = false)
+    private LocalDateTime executedAt;
 
 
 

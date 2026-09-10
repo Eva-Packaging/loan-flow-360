@@ -10,8 +10,8 @@ import java.util.Optional;
 
 @Repository
 public interface UnderwritingCaseRepository extends JpaRepository<UnderwritingCase, Long> {
-    Optional<UnderwritingCase> findByapplicationId (Long appllicationId);
-    boolean existByApplicationId (Long applicationId);
+    Optional<UnderwritingCase> findByApplicationId (Long applicationId);
+    boolean existsByApplicationId (Long applicationId);
     List<UnderwritingCase> findByCaseStatus (CaseStatus caseStatus);
 
 }
