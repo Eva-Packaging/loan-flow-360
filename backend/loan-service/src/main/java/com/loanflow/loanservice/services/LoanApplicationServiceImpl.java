@@ -7,7 +7,7 @@ import com.loanflow.common.dto.application.response.CreateLoanApplicationRespons
 import com.loanflow.common.dto.application.response.DocumentSummary;
 import com.loanflow.common.dto.enums.LoanStatus;
 import com.loanflow.common.dto.enums.LoanType;
-import com.loanflow.common.exception.AccessDeniedException;
+import com.loanflow.common.exception.ForbiddenException;
 import com.loanflow.common.exception.ResourceNotFoundException;
 import com.loanflow.loanservice.entity.LoanApplication;
 import com.loanflow.loanservice.repository.LoanApplicationRepository;
@@ -31,7 +31,8 @@ public class LoanApplicationServiceImpl implements LoanApplicationService {
                         "LoanApplication not found with id: " + applicationId));
         if ("APPLICANT".equals(callerRole)
                 && !application.getApplicantUserId().equals(callerUserId)) {
-            throw new AccessDeniedException("Access denied to application: " + applicationId);
+            throw new ForbiddenException(
+                    "Access denied to application: " + applicationId);
         }
 
         return ApplicationDetailResponse.builder()
