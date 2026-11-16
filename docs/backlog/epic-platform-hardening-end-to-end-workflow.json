@@ -1,0 +1,887 @@
+{
+  "summary": "Platform Hardening & End-to-End Loan Workflow",
+  "description": "LoanFlow 360's eight backend modules and React portal currently exist as architectural scaffolding: entities, repositories, and Flyway migrations are largely written, but no request path persists data, the identity-service module does not compile on main, five of eight backend modules sit outside the Maven reactor and the CI path filter, and the Kafka event backbone the project is named for has zero lines of code. This epic takes the platform from compiling-in-parts stubs to one demonstrable vertical slice: an applicant logs in with real credentials, submits an application that is written to MySQL, uploads a document, and watches its status change as an event-driven underwriting decision comes back, with every service building and testing in one CI run.",
+  "labels": [
+    "platform-hardening",
+    "microservices",
+    "technical-debt",
+    "end-to-end-workflow",
+    "loanflow-360"
+  ],
+  "priority": "High",
+  "userType": "engineering team delivering LoanFlow 360",
+  "functionality": "take every backend service, the shared authentication contract, the Kafka event backbone, and the React portal from scaffold to a working, persisted, and tested loan application workflow",
+  "benefit": "so the platform reaches its first genuinely demonstrable end-to-end state and every subsequent feature is built on a verified foundation instead of stubs and hard-coded responses",
+  "stories": [
+    {
+      "summary": "Fix identity-service dependencies and repair the Maven reactor",
+      "description": "identity-service fails to compile on main with 40+ 'package does not exist' errors: its pom.xml declares only web, actuator, lombok and eureka-client, while the source imports jakarta.persistence, org.hibernate.annotations, org.springframework.data.jpa and io.jsonwebtoken. A second bug compounds it — User.java imports javax.management.relation.Role, the JMX interface, instead of the real Role entity in the same package, so the user_roles mapping targets a non-entity. Neither was caught because identity-service, underwriting-service, document-service, notification-service and discovery-server are all outside loanflow-parent's <modules>, and document-service inherits spring-boot-starter-parent directly instead of loanflow-parent. This story restores one compiling eight-module reactor.",
+      "labels": [
+        "identity-service",
+        "build",
+        "maven",
+        "technical-debt"
+      ],
+      "priority": "High",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "identity-service compiles cleanly",
+          "given": "spring-boot-starter-data-jpa, spring-boot-starter-security, mysql-connector-j, flyway-core, flyway-mysql and the JJWT artifacts have been added to its pom.xml",
+          "when": "./mvnw compile is run against identity-service in isolation",
+          "then": "the build succeeds with zero compilation errors"
+        },
+        {
+          "scenario": "User maps its roles to the real Role entity",
+          "given": "the javax.management.relation.Role import has been replaced with the local Role entity",
+          "when": "Hibernate initializes the entity manager",
+          "then": "users, user_roles and roles map correctly with no mapping exception"
+        },
+        {
+          "scenario": "a single reactor build compiles all eight modules",
+          "given": "discovery-server, identity-service, underwriting-service, document-service and notification-service have been added to loanflow-parent's <modules>, and document-service has been re-parented onto loanflow-parent",
+          "when": "mvn verify is run from backend/loanflow-parent against a clean local repository",
+          "then": "all eight modules build and test successfully in one pass"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add missing dependencies to identity-service pom.xml",
+          "description": "Add <files/paths>backend/identity-service/pom.xml</files/paths> dependencies: spring-boot-starter-data-jpa, spring-boot-starter-security, mysql-connector-j, flyway-core, flyway-mysql, and the io.jsonwebtoken jjwt-api, jjwt-impl and jjwt-jackson artifacts. The source already imports all of these packages but none are declared."
+        },
+        {
+          "summary": "Fix the Role import in User.java",
+          "description": "In <files/paths>backend/identity-service/src/main/java/com/loanflow/identity/entity/User.java</files/paths>, remove `import javax.management.relation.Role;` — it shadows the real com.loanflow.identity.entity.Role in the same package and breaks the @ManyToMany mapping to user_roles."
+        },
+        {
+          "summary": "Add the five orphan modules to loanflow-parent",
+          "description": "In <files/paths>backend/loanflow-parent/pom.xml</files/paths>, add discovery-server, identity-service, underwriting-service, document-service and notification-service to <modules>, alongside the existing loanflow-common, gateway-service and loan-service entries."
+        },
+        {
+          "summary": "Re-parent document-service onto loanflow-parent",
+          "description": "In <files/paths>backend/document-service/pom.xml</files/paths>, replace the direct spring-boot-starter-parent inheritance with loanflow-parent, matching every other service, so it picks up the shared dependencyManagement instead of resolving versions independently."
+        },
+        {
+          "summary": "Run a clean reactor build and fix residual errors",
+          "description": "From backend/loanflow-parent, run `mvn -U clean verify` against an empty local repository and resolve any dependency or compilation errors surfaced by bringing the five orphan modules into the reactor for the first time."
+        }
+      ]
+    },
+    {
+      "summary": "Extend CI coverage and retire dead code",
+      "description": "loanflow-parent-ci.yml only triggers on four paths, all inside the pre-fix reactor, so a PR that breaks identity, underwriting, document or notification is reported green, and there is no job that builds the frontend at all. Separately, backend/loan-service carries a fully commented-out duplicate service package left over from a merge, identity-service ships a leftover /identityService/apiGatewayTest routing probe in its application root package, and every mvnw wrapper in the repo is non-executable, forcing contributors to type `sh ./mvnw`.",
+      "labels": [
+        "ci-cd",
+        "github-actions",
+        "technical-debt",
+        "frontend"
+      ],
+      "priority": "High",
+      "storyPoints": 3,
+      "acceptanceCriteria": [
+        {
+          "scenario": "CI fails on a broken module outside the old path filter",
+          "given": "a deliberate compile error is introduced in underwriting-service",
+          "when": "a pull request is opened against main",
+          "then": "the LoanFlow Backend CI workflow fails the check"
+        },
+        {
+          "scenario": "the frontend build is verified in CI",
+          "given": "a pull request touches frontend/loan-flow-360",
+          "when": "the workflow runs",
+          "then": "npm ci, npm run lint and npm run build all execute and must pass before the PR can merge"
+        },
+        {
+          "scenario": "no duplicate service implementations remain",
+          "given": "the commented-out loan-service/.../service/ package has been removed",
+          "when": "the reactor is built",
+          "then": "only the services package's LoanApplicationServiceImpl is present, with no leftover @Service qualifier from the prior collision"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Widen the loanflow-parent-ci.yml path filter",
+          "description": "In <files/paths>.github/workflows/loanflow-parent-ci.yml</files/paths>, change the `paths:` filters on both push and pull_request from the current four-path list to `backend/**`."
+        },
+        {
+          "summary": "Add a frontend CI job",
+          "description": "Add a job using actions/setup-node that runs `npm ci`, `npm run lint` and `npm run build` inside frontend/loan-flow-360, triggered on changes under frontend/**."
+        },
+        {
+          "summary": "Remove the commented-out loan-service duplicate package",
+          "description": "Delete <files/paths>backend/loan-service/src/main/java/com/loanflow/loanservice/service/LoanApplicationService.java</files/paths> and its commented impl counterpart, and drop the leftover `@Service(\"loanApplicationQueryService\")` qualifier on the live implementation in the services package."
+        },
+        {
+          "summary": "Remove the identity-service routing probe controller",
+          "description": "Delete <files/paths>backend/identity-service/src/main/java/com/loanflow/identity/apiGatewayTest.java</files/paths>, a temporary gateway-routing smoke test left sitting in the application's root package."
+        },
+        {
+          "summary": "Set the executable bit on every mvnw wrapper",
+          "description": "Run `git update-index --chmod=+x` against every backend/*/mvnw so contributors can run `./mvnw` directly, and add wrapper files to loanflow-common and loanflow-parent, which currently have none."
+        }
+      ]
+    },
+    {
+      "summary": "Persist identity data and implement real credential authentication",
+      "description": "identity-service has JPA entities for users, roles and refresh tokens but no datasource in any profile and no Flyway migrations, so nothing is ever written. AuthServiceImpl.login ignores the submitted password entirely and returns a literal 'stub-access-token' with role 'LOAN_OFFICER' and id 102 for any username — any caller is authenticated as a loan officer regardless of credentials.",
+      "labels": [
+        "identity-service",
+        "authentication",
+        "flyway",
+        "mysql"
+      ],
+      "priority": "High",
+      "storyPoints": 8,
+      "acceptanceCriteria": [
+        {
+          "scenario": "valid credentials issue a real signed token",
+          "given": "a user row exists with a BCrypt password_hash and ACTIVE status",
+          "when": "POST /api/v1/auth/login is submitted with the matching username and password",
+          "then": "a 200 response returns a JwtUtil-signed access token carrying the user's real id and role, not the literal stub-access-token"
+        },
+        {
+          "scenario": "invalid credentials are rejected",
+          "given": "a login request with a wrong password",
+          "when": "the request is submitted",
+          "then": "a 401 response is returned and no token is issued"
+        },
+        {
+          "scenario": "a suspended user cannot log in",
+          "given": "a user row with status SUSPENDED",
+          "when": "correct credentials are submitted",
+          "then": "a 401 response is returned"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Write Flyway migrations for users, roles, user_roles and refresh_tokens",
+          "description": "Create V1-V4 migrations under backend/identity-service/src/main/resources/db/migration matching docs/database-schema.md §1, mirroring the style already used in backend/loan-service/src/main/resources/db/migration."
+        },
+        {
+          "summary": "Add a MySQL datasource to identity-service's dev and prod profiles",
+          "description": "Add spring.datasource and spring.flyway blocks to application-dev.yaml and application-prod.yaml matching the pattern in backend/loan-service/src/main/resources/application-dev.yaml, and set jpa.hibernate.ddl-auto to validate."
+        },
+        {
+          "summary": "Seed the three RoleCode values and a dev test user per role",
+          "description": "Add a dev-profile seed migration or CommandLineRunner inserting APPLICANT, LOAN_OFFICER and ADMIN into roles, plus one seed user per role for local testing."
+        },
+        {
+          "summary": "Replace the stub AuthServiceImpl.login with BCrypt verification",
+          "description": "In <files/paths>backend/identity-service/src/main/java/com/loanflow/identity/service/impl/AuthServiceImpl.java</files/paths>, look up the user by username via UserRepository, verify the submitted password against password_hash with BCryptPasswordEncoder, reject non-ACTIVE users, and call JwtUtil.generateAccessToken with the real user id and role instead of the current hard-coded UserSummaryDto.builder().id(102L).role(\"LOAN_OFFICER\")."
+        },
+        {
+          "summary": "Add unit and slice tests for AuthServiceImpl",
+          "description": "Cover successful login, wrong password, unknown username, and non-ACTIVE user, using @DataJpaTest for the repository and a mocked PasswordEncoder for the service test."
+        }
+      ]
+    },
+    {
+      "summary": "Define the shared JWT contract and resource-server security config",
+      "description": "There is a live mismatch between token issuance and token consumption: JwtUtil emits role as a single string with no userId claim, while LoanApplicationController reads jwt.getClaim(\"userId\") and jwt.<List<String>>getClaim(\"roles\").get(0) — the first authenticated request to GET /api/v1/applications/{id} throws before it reaches the service. Compounding it, no SecurityFilterChain exists anywhere in the repo and no profile sets spring.security.oauth2.resourceserver.*, so even loan-service, which already has the resource-server starter on its classpath, has no JwtDecoder bean and @AuthenticationPrincipal Jwt always resolves to null.",
+      "labels": [
+        "security",
+        "jwt",
+        "loanflow-common",
+        "spring-security"
+      ],
+      "priority": "High",
+      "storyPoints": 8,
+      "acceptanceCriteria": [
+        {
+          "scenario": "a token's claims match what downstream controllers expect",
+          "given": "a token issued by identity-service after the shared claim contract is adopted",
+          "when": "LoanApplicationController reads jwt.getClaim(\"userId\") and jwt.<List<String>>getClaim(\"roles\").get(0)",
+          "then": "both claims are present and correctly typed, and the call no longer throws"
+        },
+        {
+          "scenario": "an authenticated request is accepted",
+          "given": "a valid bearer token",
+          "when": "a protected endpoint in loan-service or underwriting-service is called",
+          "then": "a JwtDecoder bean resolves the token and @AuthenticationPrincipal Jwt is populated, not null"
+        },
+        {
+          "scenario": "an officer-only endpoint rejects an applicant",
+          "given": "a token with role APPLICANT",
+          "when": "a @PreAuthorize(\"hasRole('LOAN_OFFICER')\") endpoint is called",
+          "then": "a 403 response is returned"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Create a shared JwtClaims constants class",
+          "description": "Add com.loanflow.common.security.JwtClaims to loanflow-common defining the canonical claim names (sub, userId, username, roles, iss, exp), and update JwtUtil.generateAccessToken in identity-service to emit userId and roles[] alongside the existing role string."
+        },
+        {
+          "summary": "Add an auto-configured resource-server SecurityFilterChain to loanflow-common",
+          "description": "Add a @Configuration bean producing a SecurityFilterChain and a shared-secret JwtDecoder, permitting /actuator/health and requiring authentication on everything else, registered through loanflow-common's existing auto-configuration mechanism so every service inherits it."
+        },
+        {
+          "summary": "Enable method security and apply @PreAuthorize to officer-only routes",
+          "description": "Add @EnableMethodSecurity to the shared config and annotate the officer-only endpoints (application search, status update, manual underwriting review) with @PreAuthorize(\"hasAnyRole('LOAN_OFFICER','ADMIN')\")."
+        },
+        {
+          "summary": "Add a cross-module claim-shape test",
+          "description": "Add a test that signs a token with JwtUtil, decodes it with the shared JwtDecoder, and asserts userId and roles[0] deserialize into the exact shape LoanApplicationController reads."
+        }
+      ]
+    },
+    {
+      "summary": "Complete the auth surface — refresh token rotation and current-user profile",
+      "description": "AuthServiceImpl.refreshToken returns RefreshTokenResponseDto.builder().build() — an empty object — wrapped around a fully commented-out real implementation, and AuthController never maps the route at all, so POST /api/v1/auth/refresh 404s despite being documented at docs/api-reference.md §1.2. GET /api/v1/auth/me, documented at §1.3 and needed by the portal to render role-based navigation, does not exist.",
+      "labels": [
+        "identity-service",
+        "rest-api",
+        "authentication"
+      ],
+      "priority": "Medium",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "a valid refresh token issues a new access token",
+          "given": "an unexpired, unrevoked refresh token stored for a user",
+          "when": "POST /api/v1/auth/refresh is called",
+          "then": "a 200 response returns a new signed access token matching the documented response shape"
+        },
+        {
+          "scenario": "an expired refresh token is rejected",
+          "given": "a refresh token past its expiresAt",
+          "when": "POST /api/v1/auth/refresh is called",
+          "then": "a 401 response is returned with the documented error payload"
+        },
+        {
+          "scenario": "the current user's profile is returned",
+          "given": "a valid bearer token",
+          "when": "GET /api/v1/auth/me is called",
+          "then": "a 200 response returns id, username, fullName, role and permissions"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Implement AuthServiceImpl.refreshToken against RefreshTokenRepository",
+          "description": "Replace the commented-out block and the current empty-builder stub with a real lookup, revocation and expiry check, issuing a new access token via JwtUtil on success."
+        },
+        {
+          "summary": "Wire POST /api/v1/auth/refresh into AuthController",
+          "description": "Add the missing @PostMapping(\"/refresh\") method, delegating to AuthService.refreshToken and mapping InvalidRefreshTokenException to 401 via GlobalExceptionHandler."
+        },
+        {
+          "summary": "Rotate the refresh token on each use",
+          "description": "On a successful refresh, revoke the old refresh_tokens row and insert a new one, so a stolen token can only be replayed once before detection."
+        },
+        {
+          "summary": "Implement GET /api/v1/auth/me",
+          "description": "Add a controller method and service call that resolves the current user from the JWT subject and returns id, username, fullName, role and permissions as documented in docs/api-reference.md §1.3."
+        }
+      ]
+    },
+    {
+      "summary": "Route the API Gateway to every service with edge JWT enforcement and CORS",
+      "description": "The gateway currently routes exactly two prefixes — /identityService/** and /notificationService/** — both to internal probe endpoints. Loan, document and underwriting are unreachable through it, there is no JWT validation at the edge, and there is no CORS configuration for the Vite dev origin, so the portal cannot call the gateway even once the routes exist.",
+      "labels": [
+        "gateway-service",
+        "spring-cloud-gateway",
+        "security",
+        "cors"
+      ],
+      "priority": "High",
+      "storyPoints": 8,
+      "acceptanceCriteria": [
+        {
+          "scenario": "every documented service is reachable through the gateway",
+          "given": "the five services are registered with Eureka",
+          "when": "a request hits /api/v1/{auth,applications,documents,underwriting,notifications}/**",
+          "then": "the gateway routes it to the matching service by lb:// service id"
+        },
+        {
+          "scenario": "an unauthenticated request to a protected route is rejected at the edge",
+          "given": "no Authorization header is present",
+          "when": "a non-public route is called through the gateway",
+          "then": "a 401 response is returned before the request reaches the downstream service"
+        },
+        {
+          "scenario": "the frontend dev server can call the gateway",
+          "given": "a request originates from http://localhost:5173",
+          "when": "a CORS preflight is issued",
+          "then": "the gateway responds with the appropriate Access-Control-Allow-Origin header"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add the missing route definitions to application-dev.yaml",
+          "description": "In <files/paths>backend/gateway-service/src/main/resources/application-dev.yaml</files/paths>, add loan-route, document-route and underwriting-route entries alongside the existing identity-route and notification-route, each with a Path predicate and lb:// uri."
+        },
+        {
+          "summary": "Add a GatewayFilter that validates the JWT before forwarding",
+          "description": "Implement a global filter using the shared JwtDecoder from loanflow-common that rejects requests with a missing or invalid token on any route not explicitly marked public (login, refresh, actuator health)."
+        },
+        {
+          "summary": "Configure CORS for the Vite dev origin",
+          "description": "Add a spring.cloud.gateway.globalcors configuration permitting http://localhost:5173 with the methods and headers the portal needs."
+        },
+        {
+          "summary": "Add a route-level integration test",
+          "description": "Add a WebTestClient test per route asserting it forwards to the correct downstream service id, and that an unauthenticated call to a protected route returns 401."
+        }
+      ]
+    },
+    {
+      "summary": "Persist the loan application lifecycle — create, enrich, search, transition",
+      "description": "createApplication builds its response with applicationId(1L) and Instant.now() and never calls LoanApplicationRepository. getApplicationById persists correctly but pads its response with an ApplicantDetailsSummary of three empty strings and a zeroed DocumentSummary. The officer search endpoint at §2.3 and the status-transition endpoint at §2.4 have DTOs written and no controller method at all, despite application_status_history already existing as a migrated table.",
+      "labels": [
+        "loan-service",
+        "rest-api",
+        "mysql",
+        "jpa"
+      ],
+      "priority": "High",
+      "storyPoints": 13,
+      "acceptanceCriteria": [
+        {
+          "scenario": "a submitted application is persisted",
+          "given": "a valid CreateLoanApplicationRequest",
+          "when": "POST /api/v1/applications is called",
+          "then": "rows are written to loan_application, loan_application_addresses, application_employment_details and application_status_history, and the returned id round-trips through GET /{applicationId}"
+        },
+        {
+          "scenario": "the detail view returns real applicant and document data",
+          "given": "a persisted application",
+          "when": "GET /api/v1/applications/{id} is called",
+          "then": "applicantDetails and documentSummary are populated from real data, not empty placeholders"
+        },
+        {
+          "scenario": "an officer searches the review queue",
+          "given": "applications exist in multiple statuses",
+          "when": "GET /api/v1/applications is called with a status filter by a LOAN_OFFICER",
+          "then": "a paged, filtered ApplicationSearchResponse is returned"
+        },
+        {
+          "scenario": "an illegal status transition is rejected",
+          "given": "an application in status REJECTED",
+          "when": "PATCH /api/v1/applications/{id}/status requests APPROVED",
+          "then": "a 409 response is returned and no history row is written"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Implement transactional persistence in LoanApplicationServiceImpl.createApplication",
+          "description": "Replace the current stub, which returns applicationId(1L) and Instant.now() without touching any repository, with a @Transactional method that saves LoanApplication, its address and employment children, and an initial SUBMITTED ApplicationStatusHistory row, generating a unique application_reference."
+        },
+        {
+          "summary": "Populate ApplicantDetailsSummary and DocumentSummary on read",
+          "description": "In getApplicationById, replace the hard-coded empty ApplicantDetailsSummary (firstName/lastName/email all \"\") and zeroed DocumentSummary with real lookups against identity-service and document-service, with a resilient fallback when either is unavailable."
+        },
+        {
+          "summary": "Implement GET /api/v1/applications search endpoint",
+          "description": "Add the controller method and service query backing docs/api-reference.md §2.3, using the existing ApplicationSearchResponse, ApplicationSummaryItem and PagedResponse DTOs, filterable by status, loan type and assigned officer."
+        },
+        {
+          "summary": "Implement PATCH /api/v1/applications/{id}/status",
+          "description": "Add the endpoint using the existing UpdateApplicationStatusRequest/Response DTOs, enforcing an explicit LoanStatus transition table and writing an ApplicationStatusHistory row with actor and reason on every accepted change."
+        },
+        {
+          "summary": "Add repository and controller slice tests",
+          "description": "Cover the create-then-read round trip, search filtering and paging, and both a legal and an illegal status transition."
+        }
+      ]
+    },
+    {
+      "summary": "Implement real underwriting decisioning and align the dev schema",
+      "description": "UnderwritingDecisionServiceImpl returns a fixed APPROVED for $25,000 over 48 months with a literal 2026-03-24T16:02:11Z timestamp, carrying its own TODO comment. All four repositories — case, checks, decision, and manual review notes — have no callers, and §4.2 manual review and §4.3 re-run are unimplemented. Separately, the dev profile runs ddl-auto: create-drop with flyway.enabled: false while the test profile runs validate with Flyway on against the same four migrations, so developers and CI exercise two different schemas.",
+      "labels": [
+        "underwriting-service",
+        "business-rules",
+        "flyway"
+      ],
+      "priority": "High",
+      "storyPoints": 8,
+      "acceptanceCriteria": [
+        {
+          "scenario": "an application within policy thresholds is approved",
+          "given": "an application with debt-to-income and income within the configured rules",
+          "when": "the underwriting engine evaluates it",
+          "then": "an UnderwritingDecision row with decisionType APPROVED is written and returned by GET /api/v1/underwriting/{applicationId}"
+        },
+        {
+          "scenario": "an application outside thresholds is sent to manual review",
+          "given": "an application that fails a rule",
+          "when": "the engine evaluates it",
+          "then": "manualReviewRequired is true and an UnderwritingCase is created in MANUAL_REVIEW status"
+        },
+        {
+          "scenario": "an unknown application id returns 404",
+          "given": "no UnderwritingCase exists for the requested applicationId",
+          "when": "GET /api/v1/underwriting/{applicationId} is called",
+          "then": "a 404 response is returned instead of the current hard-coded APPROVED decision"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Replace the hard-coded UnderwritingDecisionServiceImpl with a rules engine",
+          "description": "Replace the fixed APPROVED/$25,000/48-month stub with a rules evaluation over debt-to-income, income and requested term, persisting UnderwritingCase, UnderwritingChecks and UnderwritingDecision via their existing repositories."
+        },
+        {
+          "summary": "Implement manual review decision and re-run endpoints",
+          "description": "Add the §4.2 and §4.3 endpoints from docs/api-reference.md, role-gated to LOAN_OFFICER and ADMIN, writing ManualReviewNote rows via ManualReviewNoteRepository."
+        },
+        {
+          "summary": "Align the dev profile with the Flyway-managed test schema",
+          "description": "In <files/paths>backend/underwriting-service/src/main/resources/application-dev.yaml</files/paths>, change jpa.hibernate.ddl-auto from create-drop to validate and flyway.enabled from false to true, matching the test profile and the four existing V1-V4 migrations."
+        },
+        {
+          "summary": "Add decision-engine unit tests and extend the controller slice test",
+          "description": "Cover an approve path, a manual-review path, and the 404 case, extending the existing UnderwritingControllerTest, which currently only asserts against the hard-coded stub."
+        }
+      ]
+    },
+    {
+      "summary": "Build document-service end to end",
+      "description": "The module is one entity, three enums and one repository. It has no datasource, no migrations, no service layer, no controller and no S3 client, against a documented four-table schema (docs/database-schema.md §3) and three endpoints (docs/api-reference.md §3.1-§3.3) that nothing currently implements.",
+      "labels": [
+        "document-service",
+        "aws-s3",
+        "rest-api",
+        "flyway"
+      ],
+      "priority": "High",
+      "storyPoints": 13,
+      "acceptanceCriteria": [
+        {
+          "scenario": "a document is registered and stored",
+          "given": "a valid upload request for a required document type",
+          "when": "the §3.1 upload-metadata endpoint is called",
+          "then": "a presigned S3 upload URL is returned and an application_documents row is created in UPLOADED status"
+        },
+        {
+          "scenario": "an application's documents can be listed",
+          "given": "documents exist for an application",
+          "when": "the §3.2 list endpoint is called",
+          "then": "the documented list of documents with status is returned"
+        },
+        {
+          "scenario": "a document set is verified and the checklist evaluated",
+          "given": "all required documents for an application are UPLOADED",
+          "when": "the §3.3 verify endpoint is called",
+          "then": "each document's status moves to VERIFIED, a document_verification_audit row is written per document, and the checklist reports complete"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Write Flyway migrations for the four document-service tables",
+          "description": "Create migrations for application_documents (extending the existing ApplicationDocument entity), document_requirements, document_verification_audit and processed_events, matching docs/database-schema.md §3, and add a MySQL datasource to the dev/prod profiles."
+        },
+        {
+          "summary": "Add an S3 client and presigned upload flow",
+          "description": "Configure the AWS SDK S3 client and implement a service method that generates a presigned PUT URL and registers the corresponding application_documents metadata row."
+        },
+        {
+          "summary": "Implement the document service layer and controller",
+          "description": "Create DocumentService/DocumentServiceImpl and a DocumentController exposing §3.1-§3.3 from docs/api-reference.md, backed by the existing ApplicationDocumentRepository."
+        },
+        {
+          "summary": "Implement checklist evaluation against document_requirements",
+          "description": "Add logic that compares an application's uploaded and verified documents against the required checklist for its loan type and reports completeness."
+        },
+        {
+          "summary": "Add repository, service and controller tests",
+          "description": "Cover upload registration, listing, and the full verify flow including a checklist-incomplete case."
+        }
+      ]
+    },
+    {
+      "summary": "Build notification & audit service on MongoDB",
+      "description": "The entire service is one controller returning the literal string 'Notification Service is up and running!'. docs/database-schema.md §5 specifies three collections and docs/api-reference.md §5 specifies the timeline, notification history, and mark-read endpoints the portal's status page depends on — none of it exists.",
+      "labels": [
+        "notification-service",
+        "mongodb",
+        "rest-api"
+      ],
+      "priority": "Medium",
+      "storyPoints": 8,
+      "acceptanceCriteria": [
+        {
+          "scenario": "an application's activity timeline is retrievable",
+          "given": "audit events recorded for an application",
+          "when": "the §5.1 timeline endpoint is called",
+          "then": "a chronological list of application_audit_events is returned"
+        },
+        {
+          "scenario": "a user's notification history is retrievable",
+          "given": "notifications generated for a user",
+          "when": "the §5.2 endpoint is called",
+          "then": "the documented user_notifications list is returned"
+        },
+        {
+          "scenario": "a notification can be marked read",
+          "given": "an unread notification",
+          "when": "the §5.3 mark-read endpoint is called",
+          "then": "the notification's read state is updated and reflected on the next history call"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add a MongoDB datasource and the three documented collections",
+          "description": "Configure spring-boot-starter-data-mongodb against the compose-provided MongoDB instance, and model application_audit_events, user_notifications and event_replay_log per docs/database-schema.md §5."
+        },
+        {
+          "summary": "Replace the placeholder NotificationController with real endpoints",
+          "description": "The current controller only exposes GET /notificationService/status returning a literal string. Replace it with the §5.1-§5.3 endpoints from docs/api-reference.md."
+        },
+        {
+          "summary": "Add a mock email/SMS sender behind an interface",
+          "description": "Define a NotificationSender interface with a logging/mock implementation, so a real AWS SES integration can be swapped in later without touching the service layer."
+        },
+        {
+          "summary": "Add repository and controller tests",
+          "description": "Cover timeline retrieval, notification history, and the mark-read state change, using an embedded or Testcontainers MongoDB instance."
+        }
+      ]
+    },
+    {
+      "summary": "Stand up the Kafka event backbone with a transactional outbox and idempotent consumers",
+      "description": "common/event contains only a package-info.java. No module declares a Kafka dependency and infra/docker-compose.yml has no broker, so the six topics named in README §2 exist only on paper. There is also no outbox_events table, despite it being specified at docs/database-schema.md §2.5, meaning a publish failure after commit would silently lose the workflow trigger. Branch origin/LF3-6-Implement-shared-Kafka-event-DTOs-and-event-envelope was opened and never merged.",
+      "labels": [
+        "kafka",
+        "event-driven",
+        "loan-service",
+        "resilience"
+      ],
+      "priority": "High",
+      "storyPoints": 13,
+      "acceptanceCriteria": [
+        {
+          "scenario": "a submitted application eventually reaches underwriting",
+          "given": "an application is created via POST /api/v1/applications",
+          "when": "the full chain of loan.application.submitted, loan.document.verified and loan.underwriting.completed runs",
+          "then": "the application's status reaches an underwriting-driven state without any manual trigger"
+        },
+        {
+          "scenario": "a broker outage does not lose an event",
+          "given": "the Kafka broker is unreachable at the moment an application is created",
+          "when": "the broker becomes reachable again",
+          "then": "the outbox relay publishes the missed loan.application.submitted event once the broker recovers"
+        },
+        {
+          "scenario": "a redelivered message does not double-process",
+          "given": "a consumer receives the same eventId twice",
+          "when": "the second delivery is processed",
+          "then": "the processed_events table causes it to be skipped with no duplicate side effect"
+        },
+        {
+          "scenario": "a poison message reaches the dead-letter topic",
+          "given": "a message that repeatedly fails processing",
+          "when": "the retry budget is exhausted",
+          "then": "the message is published to its topic's dead-letter topic and the original consumer commits past it"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add Kafka and Zookeeper to infra/docker-compose.yml and the client dependency to loanflow-common",
+          "description": "Add spring-kafka to loanflow-common's dependency management, and bring up a broker locally so the six topics named in README §2 can be created and exercised."
+        },
+        {
+          "summary": "Define the shared event envelope and per-topic payload DTOs",
+          "description": "Implement the envelope in com.loanflow.common.event carrying eventId, eventType, occurredAt, correlationId and payload, replacing the current empty package-info.java, plus a typed DTO for each of the six documented topics."
+        },
+        {
+          "summary": "Implement the transactional outbox in loan-service",
+          "description": "Add an outbox_events migration per docs/database-schema.md §2.5, write an outbox row in the same transaction as application-create and status-change writes, and add a relay job that publishes pending rows and marks them sent."
+        },
+        {
+          "summary": "Implement idempotent consumers with processed_events dedupe",
+          "description": "Add processed_events migrations to document-service and underwriting-service, and implement the four consumers (document-service on loan.application.submitted, underwriting-service on loan.document.verified, notification-service on loan.status.updated and loan.underwriting.completed) checking eventId before processing."
+        },
+        {
+          "summary": "Configure retry-with-backoff and per-topic dead-letter topics",
+          "description": "Configure Spring Kafka's DefaultErrorHandler with exponential backoff and a DeadLetterPublishingRecoverer per topic, and document the manual replay procedure for a corrected DLT message."
+        }
+      ]
+    },
+    {
+      "summary": "Complete the infrastructure stack — docker-compose services, Dockerfiles, and base K8s manifests",
+      "description": "infra/docker-compose.yml defines MySQL alone, while CONTRIBUTION.md tells a new contributor that one command starts Kafka, Zookeeper, MySQL, Redis and MongoDB. It also mounts ./mysql/init and ./mysql/conf.d and reads env_file: .env — none of which exist in the repo, so the one service it does define fails to start on a fresh clone. There is also no Dockerfile anywhere in the repo and no Kubernetes manifest, despite both being named as deliverables in README module 1.",
+      "labels": [
+        "infrastructure",
+        "docker",
+        "kubernetes",
+        "devops"
+      ],
+      "priority": "Medium",
+      "storyPoints": 8,
+      "acceptanceCriteria": [
+        {
+          "scenario": "a fresh clone starts the full dependency stack",
+          "given": "infra/.env.example is copied to .env",
+          "when": "docker compose -f infra/docker-compose.yml up -d is run",
+          "then": "MySQL, Redis, Kafka, Zookeeper and MongoDB all reach a healthy state, matching what CONTRIBUTION.md already documents"
+        },
+        {
+          "scenario": "a service builds into a runnable image",
+          "given": "a service's Dockerfile",
+          "when": "docker build is run against it",
+          "then": "a layered JDK 17 image is produced that starts and passes its actuator health check"
+        },
+        {
+          "scenario": "a service deploys to a cluster",
+          "given": "the base Kubernetes manifests",
+          "when": "kubectl apply is run",
+          "then": "the deployment reaches Ready using the readiness and liveness probes already configured on the actuator endpoints"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add Kafka, Zookeeper, Redis and MongoDB to infra/docker-compose.yml",
+          "description": "Add the remaining four services with healthchecks alongside the existing MySQL definition, and commit infra/.env.example and the referenced ./mysql/init and ./mysql/conf.d directories, none of which currently exist."
+        },
+        {
+          "summary": "Add a Dockerfile per backend service",
+          "description": "Add a multi-stage, layered JDK 17 Dockerfile to each of the eight backend modules, reusing a shared base stage where practical."
+        },
+        {
+          "summary": "Add a compose profile that runs the services alongside their dependencies",
+          "description": "Extend infra/docker-compose.yml with a profile that builds and runs all eight service images against the dependency containers, for a fully containerized local stack."
+        },
+        {
+          "summary": "Add base Kubernetes Deployment and Service manifests",
+          "description": "Add one Deployment and Service manifest per backend service under infra/k8s, wiring readiness and liveness probes to the actuator endpoints already exposed in each service's application.yaml."
+        }
+      ]
+    },
+    {
+      "summary": "Apply Redis caching, gateway rate limiting, and the existing Resilience4j dependencies",
+      "description": "Redis appears in README modules 1, 2, 3 and 5, in the port table, and in docs/database-schema.md §6 as a rate-limit key design, and appears nowhere in the code. loanflow-common declares resilience4j-core, resilience4j-retry and resilience4j-circuitbreaker with the version pinned in loanflow-parent, but no annotation, config or usage exists anywhere — three dependencies shipping in every service jar for nothing.",
+      "labels": [
+        "redis",
+        "resilience4j",
+        "gateway-service",
+        "performance"
+      ],
+      "priority": "Medium",
+      "storyPoints": 8,
+      "acceptanceCriteria": [
+        {
+          "scenario": "a client is rate limited at the gateway",
+          "given": "a client exceeds the configured request rate",
+          "when": "further requests are sent within the window",
+          "then": "the gateway returns 429 using the Redis-backed key design in docs/database-schema.md §6"
+        },
+        {
+          "scenario": "a cached application read is served without hitting MySQL",
+          "given": "an application was read once and cached",
+          "when": "it is requested again before invalidation",
+          "then": "the response is served from Redis"
+        },
+        {
+          "scenario": "underwriting's external check dependency fails",
+          "given": "the circuit breaker configured around the external check is open",
+          "when": "a new underwriting request arrives",
+          "then": "it falls back to manual review instead of failing the request"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add spring-boot-starter-data-redis and configure the rate-limit key design",
+          "description": "Wire Redis into gateway-service and implement the RequestRateLimiter using the key shape documented in docs/database-schema.md §6."
+        },
+        {
+          "summary": "Add Redis-backed caching for application reads",
+          "description": "Cache GET /api/v1/applications/{id} responses in loan-service, with explicit invalidation on any accepted status transition."
+        },
+        {
+          "summary": "Add Redis-backed refresh token revocation",
+          "description": "Back logout and refresh-token revocation with a Redis key so a revoked token is rejected before its database TTL would otherwise expire it."
+        },
+        {
+          "summary": "Apply resilience4j-circuitbreaker around underwriting's external check",
+          "description": "The resilience4j-core, -retry and -circuitbreaker dependencies are already declared in loanflow-common's pom.xml but never annotated or configured anywhere. Add a @CircuitBreaker with a manual-review fallback around the external credit-check call, and expose its state on the actuator health endpoint."
+        }
+      ]
+    },
+    {
+      "summary": "Add OpenAPI documentation, Prometheus metrics, and correlation-ID logging",
+      "description": "There is no springdoc dependency anywhere, so the only API surface is a 1,015-line markdown file that will drift the moment the next endpoint ships. Actuator is exposed on every service but no Prometheus registry is configured, and nothing propagates a correlation id, so a single application cannot be traced across services.",
+      "labels": [
+        "observability",
+        "openapi",
+        "micrometer",
+        "logging"
+      ],
+      "priority": "Medium",
+      "storyPoints": 5,
+      "acceptanceCriteria": [
+        {
+          "scenario": "a service's API is browsable",
+          "given": "springdoc-openapi is added to a service",
+          "when": "/swagger-ui.html is requested",
+          "then": "the live, generated API documentation is served"
+        },
+        {
+          "scenario": "request metrics are scrapeable",
+          "given": "Micrometer's Prometheus registry is configured",
+          "when": "/actuator/prometheus is requested",
+          "then": "request-count and latency metrics are returned in Prometheus format"
+        },
+        {
+          "scenario": "a request is traceable across services",
+          "given": "a request enters through the gateway without an existing correlation id",
+          "when": "it is forwarded to a downstream service",
+          "then": "the same generated correlation id appears in both services' structured logs"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add springdoc-openapi-starter-webmvc-ui to every backend service",
+          "description": "Enable Swagger UI per service, keeping docs/api-reference.md as the human-authored reference while the generated spec becomes the day-to-day contract source."
+        },
+        {
+          "summary": "Aggregate the per-service OpenAPI specs at the gateway",
+          "description": "Add a route or aggregator page at the gateway that links to each service's Swagger UI."
+        },
+        {
+          "summary": "Add the Micrometer Prometheus registry",
+          "description": "Add micrometer-registry-prometheus to loanflow-common and expose /actuator/prometheus alongside the health, info and metrics endpoints already configured."
+        },
+        {
+          "summary": "Add an MDC correlation-ID filter",
+          "description": "Add a servlet filter shared via loanflow-common that reads or generates an X-Correlation-Id header, puts it in the MDC, and includes it in each service's structured log pattern."
+        }
+      ]
+    },
+    {
+      "summary": "Establish an integration test baseline",
+      "description": "The repo has eight test classes. Seven are the generated contextLoads stub, and UnderwritingControllerTest is the only one that asserts real behaviour — against the current hard-coded stub response. There is no coverage gate in CI, so every story in this epic could land entirely untested.",
+      "labels": [
+        "testing",
+        "testcontainers",
+        "jacoco",
+        "quality"
+      ],
+      "priority": "High",
+      "storyPoints": 8,
+      "acceptanceCriteria": [
+        {
+          "scenario": "a repository test runs against a real MySQL instance",
+          "given": "a Testcontainers MySQL container",
+          "when": "a Flyway-migrated repository test runs",
+          "then": "it validates against real MySQL behavior instead of the H2 MySQL-compatibility mode currently used"
+        },
+        {
+          "scenario": "a controller's auth and validation paths are covered",
+          "given": "a MockMvc slice test for a controller",
+          "when": "an unauthenticated, a forbidden, and a not-found request are each sent",
+          "then": "401, 403 and 404 are each asserted, not only the happy path currently covered"
+        },
+        {
+          "scenario": "coverage is enforced in CI",
+          "given": "JaCoCo is configured with an agreed floor",
+          "when": "a PR drops coverage below that floor",
+          "then": "the CI check fails"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Add Testcontainers MySQL to loan-service, underwriting-service and document-service",
+          "description": "Replace the H2-in-MySQL-mode test profile with a Testcontainers MySQL instance for repository and Flyway migration tests, catching dialect differences the H2 mode currently hides."
+        },
+        {
+          "summary": "Add a MockMvc slice test per controller",
+          "description": "Add a slice test per controller covering its happy path plus 401/403/404, replacing the reliance on generated contextLoads stubs as the only coverage."
+        },
+        {
+          "summary": "Add JaCoCo reporting to the CI workflow",
+          "description": "Add the jacoco-maven-plugin to loanflow-parent's build, publish the report as a CI artifact, and set an initial coverage floor the team agrees to ratchet up over time."
+        }
+      ]
+    },
+    {
+      "summary": "Build the applicant and officer portal past the Vite starter",
+      "description": "App.jsx still imports the Vite and React logos and routes / to a single Home page. .env.example points VITE_API_URL at jsonplaceholder.typicode.com, and apiClient.ts attaches no token and handles no 401. None of the four screens described in README module 7 — applicant submission, document upload, officer dashboard, and authenticated role-based views — exist.",
+      "labels": [
+        "frontend",
+        "react",
+        "portal"
+      ],
+      "priority": "High",
+      "storyPoints": 13,
+      "acceptanceCriteria": [
+        {
+          "scenario": "an applicant can log in and see their submitted application",
+          "given": "valid credentials",
+          "when": "the applicant logs in through the portal",
+          "then": "they land on a status page showing their application's current state, sourced from GET /api/v1/applications/{id} and the notification timeline"
+        },
+        {
+          "scenario": "an unauthenticated user is redirected",
+          "given": "no valid session",
+          "when": "a protected route is visited directly",
+          "then": "the user is redirected to the login screen"
+        },
+        {
+          "scenario": "an officer reviews the queue",
+          "given": "an authenticated LOAN_OFFICER",
+          "when": "they visit the review dashboard",
+          "then": "the paged, filterable application queue from §2.3 is shown with an action to change an application's status"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Point the frontend at the gateway and add token handling",
+          "description": "Replace the jsonplaceholder.typicode.com placeholder in .env.example with the gateway URL, and add a request interceptor in apiClient.ts that attaches the bearer token and a response interceptor that refreshes it on 401."
+        },
+        {
+          "summary": "Build the login screen and auth context",
+          "description": "Replace the default Vite Home page with a login form posting to POST /api/v1/auth/login, storing the session, and a role-aware route guard."
+        },
+        {
+          "summary": "Build the applicant submission form and status tracker",
+          "description": "Add a multi-step form posting to POST /api/v1/applications, and a status page rendering GET /api/v1/applications/{id} plus the §5.1 activity timeline."
+        },
+        {
+          "summary": "Build the officer review dashboard",
+          "description": "Add a paged table backed by GET /api/v1/applications (§2.3) with status and loan-type filters, and a detail view with the status-transition action from §2.4."
+        },
+        {
+          "summary": "Add loading and error states throughout",
+          "description": "Add skeleton loaders for async views, a global error boundary, and inline field-level validation errors surfaced from the API's ProblemDetail responses."
+        }
+      ]
+    },
+    {
+      "summary": "Reconcile CONTRIBUTION.md with the repo's actual conventions",
+      "description": "CONTRIBUTION.md documents ticket IDs as SCRUM-### throughout, while .github/workflows/pr-checks.yml fails any PR title that isn't LF3-###. Its port table assigns notification-service 8085, but neither notification-service nor document-service's dev profile currently sets an explicit server.port, risking a collision once both are configured. It also says `cd frontend && npm install`, but the app lives at frontend/loan-flow-360.",
+      "labels": [
+        "documentation",
+        "developer-experience"
+      ],
+      "priority": "Low",
+      "storyPoints": 2,
+      "acceptanceCriteria": [
+        {
+          "scenario": "the documented PR title prefix matches what CI enforces",
+          "given": "a new contributor follows CONTRIBUTION.md",
+          "when": "they open a PR titled per the doc",
+          "then": "it passes pr-checks.yml on the first attempt"
+        },
+        {
+          "scenario": "the documented ports match what each service actually binds",
+          "given": "a contributor starts every service per the port table",
+          "when": "they start notification-service and document-service together",
+          "then": "no port collision occurs"
+        }
+      ],
+      "tasks": [
+        {
+          "summary": "Fix the ticket-prefix mismatch",
+          "description": "CONTRIBUTION.md documents SCRUM-### throughout, but .github/workflows/pr-checks.yml only accepts LF3-###. Update the doc to match the enforced prefix."
+        },
+        {
+          "summary": "Fix the service port table",
+          "description": "Set explicit, non-colliding server.port values in notification-service and document-service's application-dev.yaml, and update CONTRIBUTION.md's port table to match what each service actually binds."
+        },
+        {
+          "summary": "Fix the frontend path in the setup instructions",
+          "description": "CONTRIBUTION.md says `cd frontend && npm install`, but the app lives at frontend/loan-flow-360. Update the path."
+        }
+      ]
+    }
+  ]
+}
