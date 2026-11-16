@@ -13,7 +13,7 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          # Expected format: SCRUM-### Short description
+          # Expected format: LF3-### Short description
           if echo "$PR_TITLE" | grep -qE '^LF3-[0-9]+ .+'; then
             echo "PR title is valid: $PR_TITLE"
           else
