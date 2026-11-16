@@ -14,19 +14,19 @@ All branches must follow this pattern:
 <TICKET-ID>-<short-kebab-case-description>
 ```
 
-| Segment | Rules |
-|---|---|
-| `TICKET-ID` | Jira ticket ID in all caps, e.g. `SCRUM-301` |
+| Segment                        | Rules                                                                                 |
+|--------------------------------|---------------------------------------------------------------------------------------|
+| `TICKET-ID`                    | Jira ticket ID in all caps, e.g. `LF3-301`                                            |
 | `short-kebab-case-description` | Lowercase, words separated by hyphens, no spaces or special characters, 3–6 words max |
 
 ### Branch Types
 
-| Type | Pattern | Example |
-|---|---|---|
-| Epic | `SCRUM-###-<epic-description>` | `SCRUM-276-Foundation-and-Project-Setup` |
-| Story / task | `SCRUM-###-<description>` | `SCRUM-280-repository-folder-structure` |
-| Bug fix | `SCRUM-###-fix-<description>` | `SCRUM-318-fix-token-expiry-handling` |
-| Hotfix | `hotfix/<description>` | `hotfix/null-pointer-loan-status` |
+| Type         | Pattern                        | Example                                  |
+|--------------|--------------------------------|------------------------------------------|
+| Epic         | `LF3-###-<epic-description>`   | `LF3-276-Foundation-and-Project-Setup`   |
+| Story / task | `LF3-###-<description>`        | `LF3-280-repository-folder-structure`    |
+| Bug fix      | `LF3-###-fix-<description>`    | `LF3-318-fix-token-expiry-handling`      |
+| Hotfix       | `hotfix/<description>`         | `hotfix/null-pointer-loan-status`        |
 
 ### Branching Rules
 
@@ -42,9 +42,9 @@ All branches must follow this pattern:
 
 ```
 main
-└── SCRUM-276-Foundation-and-Project-Setup        ← epic branch, cut from main
-    ├── SCRUM-280-repository-folder-structure      ← story branch, cut from epic
-    └── SCRUM-281-contribution-standards           ← story branch, cut from epic
+└── LF3-276-Foundation-and-Project-Setup        ← epic branch, cut from main
+    ├── LF3-280-repository-folder-structure      ← story branch, cut from epic
+    └── LF3-281-contribution-standards           ← story branch, cut from epic
 ```
 
 ---
@@ -54,10 +54,10 @@ main
 ### PR Title
 
 ```
-SCRUM-### Short description of change
+LF3-### Short description of change
 ```
 
-Example: `SCRUM-301 Add loan application submission endpoint`
+Example: `LF3-301 Add loan application submission endpoint`
 
 The `.github/workflows/pr-checks.yml` action validates this format automatically on every PR open, edit, or push.
 
