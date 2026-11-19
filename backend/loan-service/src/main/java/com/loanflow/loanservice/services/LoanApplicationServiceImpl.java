@@ -1,17 +1,23 @@
 package com.loanflow.loanservice.services;
 
 import com.loanflow.common.dto.application.request.CreateLoanApplicationRequest;
+import com.loanflow.common.dto.application.request.UpdateApplicationStatusRequest;
 import com.loanflow.common.dto.application.response.ApplicantDetailsSummary;
 import com.loanflow.common.dto.application.response.ApplicationDetailResponse;
 import com.loanflow.common.dto.application.response.CreateLoanApplicationResponse;
+import com.loanflow.common.dto.application.request.UpdateApplicationStatusRequest;
+import com.loanflow.loanservice.entity.LoanApplicationStatus;
 import com.loanflow.common.dto.application.response.DocumentSummary;
 import com.loanflow.common.dto.enums.LoanStatus;
 import com.loanflow.common.dto.enums.LoanType;
 import com.loanflow.common.exception.ForbiddenException;
 import com.loanflow.common.exception.ResourceNotFoundException;
 import com.loanflow.loanservice.entity.LoanApplication;
+import com.loanflow.loanservice.entity.LoanApplicationStatus;
 import com.loanflow.loanservice.repository.LoanApplicationRepository;
+import com.loanflow.loanservice.policy.LoanStatusTransitionPolicy;
 import org.springframework.stereotype.Service;
+
 
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -19,9 +25,15 @@ import java.time.ZoneOffset;
 @Service("loanApplicationQueryService")
 public class LoanApplicationServiceImpl implements LoanApplicationService {
     private final LoanApplicationRepository loanApplicationRepository;
+    private final LoanStatusTransitionPolicy loanStatusTransitionPolicy;
 
-    public LoanApplicationServiceImpl(LoanApplicationRepository loanApplicationRepository) {
+    public LoanApplicationServiceImpl(
+            LoanApplicationRepository loanApplicationRepository,
+            LoanStatusTransitionPolicy loanStatusTransitionPolicy) {
+
         this.loanApplicationRepository = loanApplicationRepository;
+        this.loanStatusTransitionPolicy = loanStatusTransitionPolicy;
+
     }
 
     @Override
@@ -67,5 +79,38 @@ public class LoanApplicationServiceImpl implements LoanApplicationService {
                 .amount(request.getAmount())
                 .nextStep("Application submitted successfully")
                 .build();
+    }
+
+    @Override
+    public void updateApplicationStatus(
+            Long applicationId,
+            UpdateApplicationStatusRequest request) {
+
+        LoanApplication application =
+                loanApplicationRepository.findById(applicationId)
+                        .orElseThrow(() ->
+                                new ResourceNotFoundException(
+                                        "LoanApplication not found with id: "
+                                        + applicationId));
+
+
+        loanStatusTransitionPolicy.validateTransition(
+                application.getStatus(),
+                LoanApplicationStatus.valueOf(
+                        request.getStatus().name()
+                )
+        );
+
+        application.setStatus(
+                LoanApplicationStatus.valueOf(
+                        request.getStatus().name()
+                )
+        );
+
+        loanApplicationRepository.save(application);
+
+
+
+
     }
 }

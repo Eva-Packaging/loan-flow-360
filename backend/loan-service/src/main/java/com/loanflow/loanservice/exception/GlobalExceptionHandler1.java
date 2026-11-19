@@ -7,9 +7,11 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+import com.loanflow.loanservice.exception.IllegalStatusTransitionException;
 
-
-public class GlobalExceptionHandler{
+@RestControllerAdvice
+public class GlobalExceptionHandler1 {
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ProblemDetail> handleNotFound(ResourceNotFoundException ex, HttpServletRequest request){
         ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
@@ -24,4 +26,19 @@ public class GlobalExceptionHandler{
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(problemDetail);
     }
+
+    @ExceptionHandler(IllegalStatusTransitionException.class)
+    public ResponseEntity<ProblemDetail> handleIllegelStatusTransition(
+            IllegalStatusTransitionException ex,
+            HttpServletRequest request) {
+
+        ProblemDetail problemDetail =
+                ProblemDetail.forStatusAndDetail(
+                        HttpStatus.CONFLICT,
+                        ex.getMessage());
+
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(problemDetail);
+    }
+
 }
