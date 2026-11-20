@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
 import com.loanflow.loanservice.entity.LoanApplicationStatus;
 import com.loanflow.loanservice.exception.IllegalStatusTransitionException;
@@ -14,10 +15,11 @@ import static org.mockito.Mockito.doThrow;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+
 
 
 @WebMvcTest(LoanApplicationController.class)
+@Import(com.loanflow.common.exception.GlobalExceptionHandler.class)
 @AutoConfigureMockMvc(addFilters = false)
 
 class LoanApplicationControllerTest {
@@ -38,19 +40,15 @@ class LoanApplicationControllerTest {
                         patch("/api/v1/applications/1/status")
                                 .contentType("application/json")
                                 .content("""
-                                    {
-                                      "status":"SUBMITTED",
-                                      "reason":"retry"
-                                    }
-                                    """)
+                        {
+                          "status":"SUBMITTED",
+                          "reason":"retry"
+                        }
+                        """)
                 )
                 .andExpect(status().isConflict())
-
-                .andExpect(
-                        jsonPath("$.title")
-                                .value("Conflict"))
-                .andExpect(jsonPath("$.status")
-                        .value(409));
+                .andExpect(jsonPath("$.title").value("ILLEGAL_STATUS_TRANSITION"))
+                .andExpect(jsonPath("$.status").value(409));
     }
 
     @Test
