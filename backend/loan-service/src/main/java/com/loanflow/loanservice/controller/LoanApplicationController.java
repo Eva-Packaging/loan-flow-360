@@ -4,6 +4,7 @@ import com.loanflow.loanservice.services.LoanApplicationService;
 import com.loanflow.common.dto.application.response.ApplicationDetailResponse;
 import com.loanflow.common.dto.application.request.CreateLoanApplicationRequest;
 import com.loanflow.common.dto.application.response.CreateLoanApplicationResponse;
+import com.loanflow.common.dto.application.request.UpdateApplicationStatusRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
@@ -15,11 +16,14 @@ import org.springframework.security.oauth2.jwt.Jwt;
 
 import org.springframework.web.bind.annotation.*;
 
+
+
 import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/applications")
 @RequiredArgsConstructor
+
 public class LoanApplicationController {
 
     private final LoanApplicationService loanApplicationService;
@@ -44,6 +48,19 @@ public class LoanApplicationController {
 
             return ResponseEntity.ok(
                     loanApplicationService.getApplicationById(applicationId, callerUserId, callerRole));
+        }
+
+        @PatchMapping("/{applicationId}/status")
+    public ResponseEntity<Void> updateApplicationStatus(
+            @PathVariable Long applicationId,
+            @RequestBody @Valid UpdateApplicationStatusRequest request) {
+
+        loanApplicationService.updateApplicationStatus(
+                applicationId,
+                request
+        );
+
+        return ResponseEntity.ok().build();
         }
     }
 
